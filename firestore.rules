@@ -1,0 +1,162 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isOwner(userId) {
+      return isSignedIn() && request.auth.uid == userId;
+    }
+
+    function isAdmin() {
+      return isSignedIn()
+        && exists(/databases/$(database)/documents/admins/$(request.auth.uid));
+    }
+
+    match /users/{userId} {
+      allow read: if isSignedIn();
+      allow create: if isOwner(userId);
+      allow update: if isAdmin() || (
+        isOwner(userId)
+        && request.resource.data.diff(resource.data).changedKeys().hasOnly([
+          'displayName',
+          'display_name',
+          'username',
+          'campusId',
+          'campus_id',
+          'avatarUrl',
+          'avatar_url',
+          'bio',
+          'relationshipStatus',
+          'relationship_status',
+          'profileCompleted',
+          'profile_completed',
+          'privateAccount',
+          'privateAlias',
+          'department',
+          'level',
+          'styleTags',
+          'style_tags',
+          'updatedAt'
+        ])
+      );
+      allow delete: if isAdmin() || (
+        isSignedIn() && resource.data.user_id == request.auth.uid
+      );
+    }
+
+    match /admins/{adminId} {
+      allow read: if isSignedIn() && (isAdmin() || request.auth.uid == adminId);
+      allow create, update, delete: if isAdmin();
+    }
+
+    match /picture_posts/{postId} {
+      allow read: if isSignedIn();
+      allow create: if isSignedIn()
+        && request.resource.data.user_id == request.auth.uid
+        && request.resource.data.caption is string
+        && request.resource.data.caption.size() <= 500
+        && request.resource.data.media_type in ['image', 'video', 'text']
+        && request.resource.data.image_url is string
+        && (
+          (request.resource.data.media_type == 'text' && request.resource.data.image_url == '')
+          || (request.resource.data.media_type != 'text' && request.resource.data.image_url.matches('^https://res.cloudinary.com/.+'))
+        )
+        && (
+          request.resource.data.thumbnail_url == ''
+          || request.resource.data.thumbnail_url.matches('^https://res.cloudinary.com/.+')
+        )
+        && request.resource.data.engagement_count == 0
+        && request.resource.data.reactions_count is map
+        && request.resource.data.reactions_count.annoyed == 0
+        && request.resource.data.reactions_count.love == 0
+        && request.resource.data.reactions_count.surprised == 0
+        && request.resource.data.reactions_count.thumbs_up == 0
+        && request.resource.data.reactions_count.laugh == 0
+        && request.resource.data.reacted_by is map
+        && request.resource.data.comments_count == 0
+        && request.resource.data.comments is list
+        && request.resource.data.views_count == 0
+        && request.resource.data.moderated_status == 'active'
+        && request.resource.data.flags_count == 0;
+
+      allow update: if isAdmin() || (
+        isSignedIn()
+        && request.resource.data.diff(resource.data).changedKeys().hasOnly([
+          'reactions_count',
+          'reacted_by',
+          'engagement_count',
+          'steeze_score',
+          'comments',
+          'comments_count'
+        ])
+        && request.resource.data.engagement_count >= 0
+        && request.resource.data.reactions_count is map
+        && request.resource.data.reactions_count.annoyed >= 0
+        && request.resource.data.reactions_count.love >= 0
+        && request.resource.data.reactions_count.surprised >= 0
+        && request.resource.data.reactions_count.thumbs_up >= 0
+        && request.resource.data.reactions_count.laugh >= 0
+        && request.resource.data.reacted_by is map
+        && request.resource.data.comments_count >= 0
+        && request.resource.data.comments is list
+        && (
+          request.resource.data.comments_count == resource.data.comments_count
+          || request.resource.data.media_type != 'text'
+        )
+      );
+      allow delete: if isAdmin();
+    }
+
+    match /post_reports/{reportId} {
+      allow read: if isAdmin() || (
+        isSignedIn() && resource.data.reporter_id == request.auth.uid
+      );
+      allow create: if isSignedIn()
+        && request.resource.data.reporter_id == request.auth.uid
+        && request.resource.data.post_id is string
+        && request.resource.data.status == 'open'
+        && request.resource.data.created_at is timestamp
+        && request.resource.data.updated_at is timestamp
+        && request.resource.data.keys().hasOnly([
+          'post_id',
+          'reporter_id',
+          'status',
+          'created_at',
+          'updated_at'
+        ]);
+      allow update, delete: if isAdmin();
+    }
+
+    match /activities/{activityId} {
+      allow read: if isSignedIn();
+      allow create: if isSignedIn()
+        && request.resource.data.actor_id == request.auth.uid
+        && request.resource.data.type in ['post_created', 'post_reacted']
+        && request.resource.data.post_id is string
+        && request.resource.data.created_at is timestamp
+        && request.resource.data.keys().hasOnly([
+          'actor_id',
+          'actor_username',
+          'actor_avatar_url',
+          'campus_id',
+          'created_at',
+          'type',
+          'post_id',
+          'post_user_id',
+          'reaction_key'
+        ]);
+      allow update, delete: if isAdmin();
+    }
+
+    match /follows/{followId} {
+      allow read: if isSignedIn();
+      allow create: if isSignedIn() && request.resource.data.followerId == request.auth.uid;
+      allow delete: if isSignedIn() && (
+        resource.data.followerId == request.auth.uid || isAdmin()
+      );
+      allow update: if false;
+    }
+  }
+}
