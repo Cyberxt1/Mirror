@@ -340,7 +340,6 @@ function Landing({
   message,
 }) {
   const [hypeIndex, setHypeIndex] = useState(0)
-  const [showMobileAuth, setShowMobileAuth] = useState(false)
 
   useEffect(() => {
     const timer = setInterval(() => {
@@ -350,52 +349,82 @@ function Landing({
   }, [])
 
   return (
-    <main className="min-h-screen bg-zinc-950 px-4 py-8 text-zinc-100 sm:px-6 lg:px-10">
+    <main className="min-h-screen bg-zinc-950 px-4 py-10 text-zinc-100 sm:px-6 lg:px-10">
       <section className="mx-auto grid w-full max-w-6xl gap-8 lg:grid-cols-[1.1fr_0.9fr]">
-        <div className="grid gap-6">
+        <div className="grid gap-8">
           <div className="rounded-3xl border border-zinc-800 bg-hero-gradient p-6 sm:p-8">
-            <p className="text-xs uppercase tracking-[0.32em] text-emerald-300">Mirror Mirror</p>
-            <h1 className="mt-3 font-display text-3xl font-semibold leading-tight sm:text-5xl">Campus style moves in motion.</h1>
-            <div className="mt-3 flex items-center gap-3 text-base font-semibold text-emerald-200 sm:text-2xl">
+            <p className="text-xs uppercase tracking-[0.32em] text-emerald-300">Mirror</p>
+            <h1 className="mt-4 font-display text-4xl font-semibold leading-tight sm:text-6xl">Your Campus. Unfiltered.</h1>
+            <p className="mt-4 max-w-xl text-base text-zinc-300 sm:text-lg">
+              The real thoughts. The real drip. The real chaos.
+              <br />
+              All in one place.
+            </p>
+            <div className="mt-6 flex flex-wrap items-center gap-3 text-sm text-zinc-300">
+              <span className="rounded-full border border-emerald-500/40 bg-emerald-500/10 px-4 py-2">Enter Mirror</span>
+              <span className="rounded-full border border-zinc-700 bg-zinc-900/60 px-4 py-2">See What’s Trending 🔥</span>
+            </div>
+            <div className="mt-6 text-xs text-zinc-400">
               <span key={hypeLines[hypeIndex]} className="typewriter">
                 {hypeLines[hypeIndex]}
               </span>
             </div>
-            <p className="mt-4 max-w-xl text-sm text-zinc-300 sm:text-base">
-              Students post in real time, the feed stays anonymous, and reactions update instantly.
-            </p>
-            <div className="mt-6 flex flex-wrap items-center gap-3 text-xs text-zinc-300">
-              <span className="rounded-full border border-emerald-500/40 bg-emerald-500/10 px-3 py-1">Live campus feed</span>
-              <span className="rounded-full border border-zinc-700 bg-zinc-900/60 px-3 py-1">Verified events</span>
-              <span className="rounded-full border border-zinc-700 bg-zinc-900/60 px-3 py-1">Steeze score</span>
-            </div>
-            <button
-              type="button"
-              onClick={() => setShowMobileAuth(true)}
-              className="mt-6 w-full rounded-full border border-emerald-400/40 bg-emerald-500/10 px-4 py-2 text-sm font-semibold text-emerald-100 sm:hidden"
-            >
-              Login
-            </button>
           </div>
 
-          <div className="hero-video-card">
-            <video className="hero-video" autoPlay muted loop playsInline preload="metadata">
-              <source src="/hero-video.mp4" type="video/mp4" />
-            </video>
-            <div className="hero-video-overlay">
-              <div>
-                <p className="text-xs uppercase tracking-[0.3em] text-emerald-200/80">Now playing</p>
-                <h2 className="font-display text-2xl font-semibold">Mirror highlights</h2>
-                <p className="mt-2 text-sm text-zinc-200/80">A taste of the feed your campus will scroll through daily.</p>
-              </div>
-              <button
-                type="button"
-                onClick={() => setShowMobileAuth(true)}
-                className="rounded-full border border-emerald-300/40 px-4 py-2 text-xs"
-              >
-                Watch in feed
-              </button>
+          <div className="rounded-3xl border border-zinc-800 bg-zinc-900/60 p-6 sm:p-8">
+            <p className="text-xs uppercase tracking-[0.3em] text-emerald-200/80">Identity hook</p>
+            <h2 className="mt-3 font-display text-2xl font-semibold">Students don’t join platforms. They join identity.</h2>
+            <div className="mt-4 grid gap-2 text-sm text-zinc-300">
+              <p>Are you:</p>
+              <p>The quiet observer?</p>
+              <p>The fashion plug?</p>
+              <p>The anonymous ranter?</p>
+              <p>The streak grinder?</p>
+              <p>The campus legend in progress?</p>
             </div>
+            <p className="mt-4 text-sm text-emerald-200">Mirror shows who you really are.</p>
+          </div>
+
+          <div className="grid gap-4 sm:grid-cols-2">
+            <div className="rounded-3xl border border-zinc-800 bg-zinc-900/60 p-6">
+              <p className="text-xs uppercase tracking-[0.3em] text-zinc-500">Today</p>
+              <div className="mt-3 space-y-2 text-sm text-zinc-200">
+                <p>🔥 248 posts today</p>
+                <p>👀 1,204 reactions this week</p>
+                <p>🎭 73 anonymous confessions</p>
+                <p>🏆 19 students on fire streak</p>
+              </div>
+            </div>
+            <div className="rounded-3xl border border-zinc-800 bg-zinc-900/60 p-6">
+              <p className="text-xs uppercase tracking-[0.3em] text-zinc-500">Why Mirror</p>
+              <p className="mt-3 text-sm text-zinc-200">
+                You scroll Instagram. You watch TikTok.
+                <br />
+                But what’s happening on your campus?
+              </p>
+              <p className="mt-3 text-sm text-emerald-200">
+                Mirror is built for your school. Not for influencers in LA. For you.
+              </p>
+            </div>
+          </div>
+
+          <div className="rounded-3xl border border-zinc-800 bg-zinc-900/60 p-6 sm:p-8">
+            <p className="text-xs uppercase tracking-[0.3em] text-zinc-500">What’s inside</p>
+            <div className="mt-4 grid gap-2 text-sm text-zinc-200">
+              <p>👤 Profiles that evolve</p>
+              <p>🔥 Streaks that build status</p>
+              <p>🎭 Anonymous rooms</p>
+              <p>💬 Real comments, not fake hype</p>
+              <p>👗 Outfit drops</p>
+              <p>🏆 Leaderboards</p>
+            </div>
+          </div>
+
+          <div className="rounded-3xl border border-emerald-500/30 bg-emerald-500/10 p-6 sm:p-8">
+            <h2 className="font-display text-2xl font-semibold">Stop watching. Start being seen.</h2>
+            <button type="button" className="mt-4 w-full rounded-full bg-emerald-500 px-4 py-2 text-sm font-semibold text-zinc-950">
+              Join Mirror
+            </button>
           </div>
         </div>
 
@@ -460,41 +489,6 @@ function Landing({
           </div>
         </aside>
       </section>
-
-      {showMobileAuth && (
-        <div className="fixed inset-0 z-40 grid place-items-center bg-zinc-950/80 p-4 backdrop-blur-sm sm:hidden" onClick={() => setShowMobileAuth(false)}>
-          <div className="w-full max-w-sm rounded-2xl border border-zinc-700 bg-zinc-950 p-5" onClick={(event) => event.stopPropagation()}>
-            <div className="flex items-center justify-between">
-              <p className="font-display text-lg font-semibold text-zinc-100">Get in</p>
-              <button type="button" onClick={() => setShowMobileAuth(false)} className="rounded-full border border-zinc-700 px-3 py-1 text-xs">
-                Close
-              </button>
-            </div>
-            <div className="mt-4 grid gap-3">
-              <button
-                type="button"
-                onClick={() => {
-                  setMode('login')
-                  setShowMobileAuth(false)
-                }}
-                className="w-full rounded-xl bg-emerald-500 px-3 py-2 text-sm font-semibold text-zinc-950"
-              >
-                Login
-              </button>
-              <button
-                type="button"
-                onClick={() => {
-                  setMode('signup')
-                  setShowMobileAuth(false)
-                }}
-                className="w-full rounded-xl border border-emerald-400/40 bg-emerald-500/10 px-3 py-2 text-sm font-semibold text-emerald-100"
-              >
-                Sign up
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
     </main>
   )
 }
@@ -549,6 +543,14 @@ function App() {
   const [actionToast, setActionToast] = useState(null)
   const [pendingReactions, setPendingReactions] = useState({})
   const [pendingComments, setPendingComments] = useState({})
+  const [editProfileDraft, setEditProfileDraft] = useState({
+    displayName: '',
+    username: '',
+    bio: '',
+    department: '',
+    level: '',
+    relationshipStatus: '',
+  })
 
   const baseProfile = {
     displayName: 'Mirror Student',
@@ -1052,6 +1054,18 @@ function App() {
       if (unsubFollowState) unsubFollowState()
     }
   }, [profileViewId, currentUserId, previewUser])
+
+  useEffect(() => {
+    if (!showEditProfileModal) return
+    setEditProfileDraft({
+      displayName: '',
+      username: '',
+      bio: '',
+      department: profile.department || 'Computer Science',
+      level: profile.level || '100',
+      relationshipStatus: profile.relationshipStatus || 'single',
+    })
+  }, [showEditProfileModal, profile.department, profile.level, profile.relationshipStatus])
 
   const mySteezeAvg = useMemo(() => {
     if (!currentUserId) return 0
@@ -1701,21 +1715,36 @@ function App() {
   async function saveProfile(event) {
     event.preventDefault()
     if (!currentUserId) return
+    const nextDisplayName = editProfileDraft.displayName.trim() || profile.displayName
+    const nextUsername = editProfileDraft.username.trim() || profile.username
+    const nextBio = editProfileDraft.bio.trim() || profile.bio
+    const nextDepartment = editProfileDraft.department || profile.department || 'Computer Science'
+    const nextLevel = editProfileDraft.level || profile.level || '100'
+    const nextRelationshipStatus = editProfileDraft.relationshipStatus || profile.relationshipStatus || 'single'
+    setProfile((prev) => ({
+      ...prev,
+      displayName: nextDisplayName,
+      username: nextUsername,
+      bio: nextBio,
+      department: nextDepartment,
+      level: nextLevel,
+      relationshipStatus: nextRelationshipStatus,
+    }))
     if (isFirebaseConfigured && !previewUser) {
       const profileRef = doc(db, 'users', currentUserId)
       await setDoc(
         profileRef,
         {
-          displayName: profile.displayName,
-          username: profile.username,
+          displayName: nextDisplayName,
+          username: nextUsername,
           campusId: profile.campusId,
           avatarUrl: profile.avatarUrl,
-          bio: profile.bio,
-          relationshipStatus: profile.relationshipStatus,
+          bio: nextBio,
+          relationshipStatus: nextRelationshipStatus,
           privateAccount: settings.privateAccount,
           privateAlias: profile.privateAlias || generatePrivateAlias(currentUserId),
-          department: profile.department || 'Computer Science',
-          level: profile.level || '100',
+          department: nextDepartment,
+          level: nextLevel,
           profileCompleted: profile.profileCompleted,
           styleTags: profile.styleTags,
           updatedAt: serverTimestamp(),
@@ -1724,6 +1753,22 @@ function App() {
       )
     }
     setMessage('Profile saved.')
+  }
+
+  async function removeProfileAvatar() {
+    if (!currentUserId) return
+    setProfile((prev) => ({ ...prev, avatarUrl: '' }))
+    if (isFirebaseConfigured && !previewUser) {
+      await setDoc(
+        doc(db, 'users', currentUserId),
+        {
+          avatarUrl: '',
+          updatedAt: serverTimestamp(),
+        },
+        { merge: true },
+      )
+    }
+    setMessage('Profile photo removed.')
   }
 
   async function followUser(targetId) {
@@ -3096,27 +3141,34 @@ function App() {
               </button>
             </div>
             <input
-              value={profile.displayName}
-              onChange={(event) => setProfile((prev) => ({ ...prev, displayName: event.target.value }))}
-              placeholder="Display name"
+              value={editProfileDraft.displayName}
+              onChange={(event) => setEditProfileDraft((prev) => ({ ...prev, displayName: event.target.value }))}
+              placeholder={profile.displayName || 'Display name'}
               className="w-full rounded-xl border border-zinc-700 bg-zinc-950 px-3 py-2 text-sm"
             />
             <input
-              value={profile.username}
-              onChange={(event) => setProfile((prev) => ({ ...prev, username: event.target.value }))}
-              placeholder="Username"
+              value={editProfileDraft.username}
+              onChange={(event) => setEditProfileDraft((prev) => ({ ...prev, username: event.target.value }))}
+              placeholder={profile.username || 'Username'}
               className="w-full rounded-xl border border-zinc-700 bg-zinc-950 px-3 py-2 text-sm"
             />
             <div className="rounded-xl border border-zinc-800 bg-zinc-950 p-3">
               <p className="text-xs text-zinc-400">{avatarUploading ? 'Uploading photo...' : 'Profile photo'}</p>
-              <label className="mt-2 inline-flex cursor-pointer items-center rounded-lg border border-zinc-700 px-3 py-2 text-xs text-zinc-200">
-                Upload photo
-                <input type="file" accept="image/*" onChange={uploadProfileAvatar} className="hidden" />
-              </label>
+              <div className="mt-2 flex flex-wrap gap-2">
+                <label className="inline-flex cursor-pointer items-center rounded-lg border border-zinc-700 px-3 py-2 text-xs text-zinc-200">
+                  {profile.avatarUrl ? 'Change photo' : 'Upload photo'}
+                  <input type="file" accept="image/*" onChange={uploadProfileAvatar} className="hidden" />
+                </label>
+                {profile.avatarUrl && (
+                  <button type="button" onClick={removeProfileAvatar} className="rounded-lg border border-rose-500/40 px-3 py-2 text-xs text-rose-300">
+                    Remove photo
+                  </button>
+                )}
+              </div>
             </div>
             <select
-              value={profile.department || 'Computer Science'}
-              onChange={(event) => setProfile((prev) => ({ ...prev, department: event.target.value }))}
+              value={editProfileDraft.department || profile.department || 'Computer Science'}
+              onChange={(event) => setEditProfileDraft((prev) => ({ ...prev, department: event.target.value }))}
               className="w-full rounded-xl border border-zinc-700 bg-zinc-950 px-3 py-2 text-sm"
             >
               {departmentsByFaculty.map((group) => (
@@ -3130,8 +3182,8 @@ function App() {
               ))}
             </select>
             <select
-              value={profile.level || '100'}
-              onChange={(event) => setProfile((prev) => ({ ...prev, level: event.target.value }))}
+              value={editProfileDraft.level || profile.level || '100'}
+              onChange={(event) => setEditProfileDraft((prev) => ({ ...prev, level: event.target.value }))}
               className="w-full rounded-xl border border-zinc-700 bg-zinc-950 px-3 py-2 text-sm"
             >
               <option value="100">100</option>
@@ -3142,17 +3194,17 @@ function App() {
               <option value="PG">PG</option>
             </select>
             <select
-              value={profile.relationshipStatus || 'single'}
-              onChange={(event) => setProfile((prev) => ({ ...prev, relationshipStatus: event.target.value }))}
+              value={editProfileDraft.relationshipStatus || profile.relationshipStatus || 'single'}
+              onChange={(event) => setEditProfileDraft((prev) => ({ ...prev, relationshipStatus: event.target.value }))}
               className="w-full rounded-xl border border-zinc-700 bg-zinc-950 px-3 py-2 text-sm"
             >
               <option value="single">single</option>
               <option value="stolen">stolen</option>
             </select>
             <textarea
-              value={profile.bio}
-              onChange={(event) => setProfile((prev) => ({ ...prev, bio: event.target.value }))}
-              placeholder="Bio"
+              value={editProfileDraft.bio}
+              onChange={(event) => setEditProfileDraft((prev) => ({ ...prev, bio: event.target.value }))}
+              placeholder={profile.bio || 'Bio'}
               rows={4}
               className="w-full rounded-xl border border-zinc-700 bg-zinc-950 px-3 py-2 text-sm"
             />
