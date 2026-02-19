@@ -213,6 +213,119 @@ function validateMediaFile(file) {
   return ''
 }
 
+const safeUserMessages = [
+  'Select a file to upload.',
+  'Only images are allowed.',
+  'Only images and videos are allowed.',
+  'No file selected.',
+  'File too large.',
+  'File is too large.',
+  'Write something before publishing.',
+  'Add an image for reflection post.',
+  'You must be logged in to upload media.',
+  'Firebase is not configured.',
+  'Firebase is not configured yet.',
+]
+
+function getFriendlyErrorMessage(error, context = 'general') {
+  const fallbackByContext = {
+    auth: 'Could not sign in. Please try again.',
+    upload: 'Media upload failed. Please try again.',
+    publish: 'Could not publish post. Please try again.',
+    reaction: 'Could not save reaction.',
+    comment: 'Could not add comment.',
+    profile: 'Could not update profile.',
+    settings: 'Could not save settings.',
+    general: 'Something went wrong. Please try again.',
+  }
+  const rawMessage = String(error?.message || '').trim()
+  const code = String(error?.code || '').trim().toLowerCase()
+  const message = rawMessage || fallbackByContext[context] || fallbackByContext.general
+  const lowerMessage = message.toLowerCase()
+
+  if (safeUserMessages.some((text) => message.startsWith(text))) {
+    return message
+  }
+
+  if (code.startsWith('auth/')) {
+    switch (code) {
+      case 'auth/email-already-in-use':
+        return 'This email is already in use.'
+      case 'auth/invalid-email':
+        return 'Enter a valid email address.'
+      case 'auth/weak-password':
+        return 'Password should be at least 6 characters.'
+      case 'auth/user-not-found':
+      case 'auth/wrong-password':
+        return 'Email or password is incorrect.'
+      case 'auth/popup-closed-by-user':
+        return 'Sign-in popup was closed.'
+      case 'auth/network-request-failed':
+        return 'Network error. Check your connection.'
+      case 'auth/too-many-requests':
+        return 'Too many attempts. Try again later.'
+      case 'auth/operation-not-allowed':
+        return "This sign-in method isn't enabled yet."
+      case 'auth/invalid-credential':
+        return 'Invalid credentials. Try again.'
+      case 'auth/user-disabled':
+        return 'Your account has been disabled.'
+      default:
+        return fallbackByContext.auth
+    }
+  }
+
+  if (code === 'permission-denied' || lowerMessage.includes('permission') || lowerMessage.includes('insufficient')) {
+    return 'You do not have permission to do that.'
+  }
+  if (code === 'unauthenticated') {
+    return 'Please log in again and try.'
+  }
+  if (code === 'already-exists' || lowerMessage.includes('already exists')) {
+    return 'That already exists.'
+  }
+  if (code === 'resource-exhausted' || lowerMessage.includes('quota')) {
+    return 'Service is busy. Try again later.'
+  }
+  if (code === 'unavailable' || lowerMessage.includes('unavailable')) {
+    return 'Service is temporarily unavailable.'
+  }
+  if (code === 'deadline-exceeded' || lowerMessage.includes('timeout')) {
+    return 'Request timed out. Try again.'
+  }
+  if (lowerMessage.includes('network') || error?.name === 'AbortError') {
+    return 'Network error. Check your connection.'
+  }
+  if (lowerMessage.includes('app check')) {
+    return 'Uploads are unavailable right now.'
+  }
+  if (
+    lowerMessage.includes('cloudinary') ||
+    lowerMessage.includes('upload signature') ||
+    lowerMessage.includes('sign upload') ||
+    lowerMessage.includes('signature endpoint') ||
+    lowerMessage.includes('upload failed')
+  ) {
+    return fallbackByContext.upload
+  }
+  if (lowerMessage.includes('firebase') || lowerMessage.includes('projects/')) {
+    return fallbackByContext.general
+  }
+  if (message.includes('http://') || message.includes('https://')) {
+    return fallbackByContext.general
+  }
+
+  return fallbackByContext[context] || fallbackByContext.general
+}
+
+function getFeedSnapshotMessage(error) {
+  const raw = String(error?.message || '').toLowerCase()
+  if (raw.includes('index')) {
+    return 'Feed index missing. Deploy Firestore indexes then reload.'
+  }
+  return getFriendlyErrorMessage(error, 'general')
+}
+
 function Landing({
   mode,
   setMode,
@@ -754,33 +867,73 @@ function App() {
 
     const unsubs = []
     unsubs.push(
-      onSnapshot(query(postsRef, where('campus_id', '==', campusId), where('created_at', '>=', cutoffDate), orderBy('created_at', 'desc'), limit(feedFetchLimit)), (snapshot) => {
-        bucketState.campus = snapshot.docs.map(normalizePost)
-        rankPosts()
-      }),
+      onSnapshot(
+        query(postsRef, where('campus_id', '==', campusId), where('created_at', '>=', cutoffDate), orderBy('created_at', 'desc'), limit(feedFetchLimit)),
+        (snapshot) => {
+          bucketState.campus = snapshot.docs.map(normalizePost)
+          rankPosts()
+        },
+        (error) => {
+          console.error('Campus feed snapshot error', error)
+          setMessage(getFeedSnapshotMessage(error))
+        },
+      ),
     )
 
     unsubs.push(
-      onSnapshot(query(postsRef, where('created_at', '>=', cutoffDate), orderBy('created_at', 'desc'), limit(feedFetchLimit)), (snapshot) => {
-        bucketState.global = snapshot.docs.map(normalizePost)
-        rankPosts()
-      }),
+      onSnapshot(
+        query(postsRef, where('created_at', '>=', cutoffDate), orderBy('created_at', 'desc'), limit(feedFetchLimit)),
+        (snapshot) => {
+          bucketState.global = snapshot.docs.map(normalizePost)
+          rankPosts()
+        },
+        (error) => {
+          console.error('Global feed snapshot error', error)
+          setMessage(getFeedSnapshotMessage(error))
+        },
+      ),
     )
 
     unsubs.push(
-      onSnapshot(query(postsRef, where('user_id', '==', currentUserId), where('created_at', '>=', cutoffDate), orderBy('created_at', 'desc'), limit(Math.max(60, Math.floor(feedFetchLimit / 2)))), (snapshot) => {
-        bucketState.mine = snapshot.docs.map(normalizePost)
-        rankPosts()
-      }),
+      onSnapshot(
+        query(
+          postsRef,
+          where('user_id', '==', currentUserId),
+          where('created_at', '>=', cutoffDate),
+          orderBy('created_at', 'desc'),
+          limit(Math.max(60, Math.floor(feedFetchLimit / 2))),
+        ),
+        (snapshot) => {
+          bucketState.mine = snapshot.docs.map(normalizePost)
+          rankPosts()
+        },
+        (error) => {
+          console.error('My feed snapshot error', error)
+          setMessage(getFeedSnapshotMessage(error))
+        },
+      ),
     )
 
     const followed = followingIds.filter((id) => id && id !== currentUserId).slice(0, 40)
     splitIntoChunks(followed, 10).forEach((chunk, index) => {
       unsubs.push(
-        onSnapshot(query(postsRef, where('user_id', 'in', chunk), where('created_at', '>=', cutoffDate), orderBy('created_at', 'desc'), limit(Math.max(80, Math.floor(feedFetchLimit / 2)))), (snapshot) => {
-          bucketState.following[index] = snapshot.docs.map(normalizePost)
-          rankPosts()
-        }),
+        onSnapshot(
+          query(
+            postsRef,
+            where('user_id', 'in', chunk),
+            where('created_at', '>=', cutoffDate),
+            orderBy('created_at', 'desc'),
+            limit(Math.max(80, Math.floor(feedFetchLimit / 2))),
+          ),
+          (snapshot) => {
+            bucketState.following[index] = snapshot.docs.map(normalizePost)
+            rankPosts()
+          },
+          (error) => {
+            console.error('Following feed snapshot error', error)
+            setMessage(getFeedSnapshotMessage(error))
+          },
+        ),
       )
     })
 
@@ -919,7 +1072,6 @@ function App() {
       setPostUserProfiles({})
       return
     }
-    setPostUserProfiles({})
     const unsubs = []
     splitIntoChunks(userIds, 10).forEach((chunk) => {
       const q = query(collection(db, 'users'), where(documentId(), 'in', chunk))
@@ -939,18 +1091,22 @@ function App() {
 
   function resolvePostAuthor(post) {
     const latest = postUserProfiles[post.user_id]
-    const isPrivate = latest?.privateAccount ?? Boolean(post.author_is_private)
+    const postPrivacyKnown = typeof post.author_is_private === 'boolean'
+    const isPrivate = postPrivacyKnown ? post.author_is_private : Boolean(latest?.privateAccount)
+    const postLabel = post.author_display_name || post.author_private_alias || ''
+    const postHandle = post.author_username || ''
+    const postAvatar = post.author_avatar_url || ''
     if (isPrivate) {
       return {
-        label: latest?.privateAlias || post.author_private_alias || generatePrivateAlias(post.user_id),
+        label: post.author_private_alias || latest?.privateAlias || generatePrivateAlias(post.user_id),
         handle: '@hidden',
         avatarUrl: '',
       }
     }
     return {
-      label: latest?.displayName || post.author_display_name || post.author_username || 'Mirror Student',
-      handle: latest?.username || post.author_username || '@mirrorstudent',
-      avatarUrl: latest?.avatarUrl || post.author_avatar_url || '',
+      label: postLabel || latest?.displayName || post.author_username || 'Mirror Student',
+      handle: postHandle || latest?.username || '@mirrorstudent',
+      avatarUrl: postAvatar || latest?.avatarUrl || '',
     }
   }
   const homePosts = useMemo(() => visiblePosts.filter((post) => (post.media_type || 'text') === 'text'), [visiblePosts])
@@ -1067,7 +1223,8 @@ function App() {
       }
       setPassword('')
     } catch (error) {
-      setMessage(error.message)
+      console.error('Auth error', error)
+      setMessage(getFriendlyErrorMessage(error, 'auth'))
     } finally {
       setLoading(false)
     }
@@ -1084,7 +1241,8 @@ function App() {
       await signInWithPopup(auth, googleProvider)
       setMessage('Welcome back.')
     } catch (error) {
-      setMessage(error.message)
+      console.error('Google auth error', error)
+      setMessage(getFriendlyErrorMessage(error, 'auth'))
     } finally {
       setLoading(false)
     }
@@ -1215,7 +1373,8 @@ function App() {
         publicId = uploaded.publicId
         setUploadStatus('Upload complete.')
       } catch (error) {
-        setMessage(error.message)
+        console.error('Upload error', error)
+        setMessage(getFriendlyErrorMessage(error, 'upload'))
         setUploading(false)
         setIsPublishing(false)
         return
@@ -1279,7 +1438,8 @@ function App() {
       setUploadStatus('')
     } catch (error) {
       setPosts((prev) => prev.filter((post) => post.id !== tempId))
-      setMessage(error.message)
+      console.error('Publish error', error)
+      setMessage(getFriendlyErrorMessage(error, 'publish'))
     } finally {
       setIsPublishing(false)
     }
@@ -1382,7 +1542,8 @@ function App() {
             : post,
         ),
       )
-      setMessage(error?.message || 'Could not save reaction.')
+      console.error('Reaction error', error)
+      setMessage(getFriendlyErrorMessage(error, 'reaction'))
     }
   }
 
@@ -1438,7 +1599,8 @@ function App() {
           })
         })
       } catch (error) {
-        setMessage(error?.message || 'Could not add comment.')
+        console.error('Comment error', error)
+        setMessage(getFriendlyErrorMessage(error, 'comment'))
       }
     }
   }
@@ -1528,7 +1690,8 @@ function App() {
       showActionToast('Post deleted.')
     } catch (error) {
       setPosts(previousPosts)
-      setMessage(error?.message || 'Could not delete post.')
+      console.error('Delete post error', error)
+      setMessage(getFriendlyErrorMessage(error, 'publish'))
     }
   }
 
@@ -1663,7 +1826,8 @@ function App() {
       }
       setMessage('Profile photo updated.')
     } catch (error) {
-      setMessage(error?.message || 'Could not upload profile photo.')
+      console.error('Avatar upload error', error)
+      setMessage(getFriendlyErrorMessage(error, 'upload'))
     } finally {
       setAvatarUploading(false)
     }
@@ -1757,7 +1921,8 @@ function App() {
       if (text.toLowerCase().includes('permission') || text.toLowerCase().includes('insufficient')) {
         setMessage('Missing or insufficient permissions. Deploy latest Firestore rules, then try again.')
       } else {
-        setMessage(error.message || 'Failed to seed posts.')
+        console.error('Seed error', error)
+        setMessage(getFriendlyErrorMessage(error, 'general'))
       }
     } finally {
       setIsSeeding(false)
