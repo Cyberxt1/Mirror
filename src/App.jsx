@@ -559,6 +559,8 @@ function App() {
   const [roomDraft, setRoomDraft] = useState({ name: '', description: '', postTtl: 60 })
   const [roomPostDraft, setRoomPostDraft] = useState('')
   const [roomSearch, setRoomSearch] = useState('')
+  const [roomMemberExists, setRoomMemberExists] = useState(false)
+  const [roomRequestProfiles, setRoomRequestProfiles] = useState({})
   const [showCreateRoom, setShowCreateRoom] = useState(false)
   const [canCreateRooms, setCanCreateRooms] = useState(false)
   const [isCreatingRoom, setIsCreatingRoom] = useState(false)
@@ -578,6 +580,7 @@ function App() {
   const [actionToast, setActionToast] = useState(null)
   const [pendingReactions, setPendingReactions] = useState({})
   const [pendingComments, setPendingComments] = useState({})
+  const [showNotifications, setShowNotifications] = useState(false)
   const [editProfileDraft, setEditProfileDraft] = useState({
     displayName: '',
     username: '',
@@ -630,6 +633,7 @@ function App() {
   const [profileLoading, setProfileLoading] = useState(false)
   const centerScrollRef = useRef(null)
   const actionToastTimerRef = useRef(null)
+  const roomMemberExistsRef = useRef(false)
 
   const currentUser = user ?? previewUser
   const currentUserId = currentUser?.uid || currentUser?.id
@@ -1099,6 +1103,8 @@ function App() {
       setRoomRequestStatus(null)
       setRoomRequests([])
       setRoomMembers([])
+      setRoomMemberExists(false)
+      setRoomRequestProfiles({})
       return
     }
     setRoomLoading(true)
@@ -1138,8 +1144,21 @@ function App() {
 
     const unsubMember = onSnapshot(
       memberRef,
-      (snap) => setRoomRequestStatus(snap.exists() ? 'approved' : null),
-      () => setRoomRequestStatus(null),
+      (snap) => {
+        const exists = snap.exists()
+        roomMemberExistsRef.current = exists
+        setRoomMemberExists(exists)
+        if (exists) {
+          setRoomRequestStatus('approved')
+        } else {
+          setRoomRequestStatus(null)
+        }
+      },
+      () => {
+        roomMemberExistsRef.current = false
+        setRoomMemberExists(false)
+        setRoomRequestStatus(null)
+      },
     )
 
     const unsubRequests = onSnapshot(
@@ -1148,7 +1167,7 @@ function App() {
         const rows = snap.docs.map((docSnap) => ({ id: docSnap.id, ...docSnap.data() }))
         setRoomRequests(rows)
         const myRequest = rows.find((row) => row.user_id === currentUserId)
-        if (myRequest && myRequest.status && myRequest.status !== 'approved') {
+        if (!roomMemberExistsRef.current && myRequest && myRequest.status && myRequest.status !== 'approved') {
           setRoomRequestStatus(myRequest.status)
         }
       },
@@ -1169,6 +1188,34 @@ function App() {
       unsubMembers()
     }
   }, [selectedRoom?.id, isAuthed, currentUserId, previewUser])
+
+  useEffect(() => {
+    if (!selectedRoom?.id || !isAuthed || !isFirebaseConfigured || previewUser) {
+      setRoomRequestProfiles({})
+      return
+    }
+    const requestUserIds = Array.from(new Set(roomRequests.map((req) => req.user_id).filter(Boolean))).slice(0, 100)
+    if (requestUserIds.length === 0) {
+      setRoomRequestProfiles({})
+      return
+    }
+    setRoomRequestProfiles({})
+    const unsubs = []
+    splitIntoChunks(requestUserIds, 10).forEach((chunk) => {
+      const q = query(collection(db, 'users'), where(documentId(), 'in', chunk))
+      const unsub = onSnapshot(q, (snap) => {
+        setRoomRequestProfiles((prev) => {
+          const next = { ...prev }
+          snap.docs.forEach((docSnap) => {
+            next[docSnap.id] = normalizeProfile(docSnap.data(), baseProfile)
+          })
+          return next
+        })
+      })
+      unsubs.push(unsub)
+    })
+    return () => unsubs.forEach((unsub) => unsub())
+  }, [roomRequests, selectedRoom?.id, isAuthed, isFirebaseConfigured, previewUser, baseProfile])
 
   useEffect(() => {
     if (!profileViewId || !isFirebaseConfigured || previewUser) return
@@ -1345,6 +1392,27 @@ function App() {
   }, [rooms, roomSearch])
 
   const visibleFeedPosts = useMemo(() => moodFilteredHomePosts.slice(0, feedVisibleCount), [moodFilteredHomePosts, feedVisibleCount])
+  const notifications = useMemo(
+    () =>
+      liveActivities.filter(
+        (item) => item.post_user_id === currentUserId && item.actor_id && item.actor_id !== currentUserId,
+      ),
+    [liveActivities, currentUserId],
+  )
+  const adminUsersById = useMemo(() => {
+    const map = {}
+    adminUsers.forEach((entry) => {
+      map[entry.id] = entry
+    })
+    return map
+  }, [adminUsers])
+  const adminPostsById = useMemo(() => {
+    const map = {}
+    adminPosts.forEach((entry) => {
+      map[entry.id] = entry
+    })
+    return map
+  }, [adminPosts])
 
   function loadMoreFeed() {
     setFeedVisibleCount((prev) => {
@@ -2511,6 +2579,38 @@ function App() {
                   </button>
                 )}
               </div>
+              <div className="relative">
+                <button
+                  type="button"
+                  onClick={() => setShowNotifications((prev) => !prev)}
+                  className="relative grid h-9 w-9 place-items-center rounded-full border border-zinc-800 text-zinc-300"
+                  aria-label="Notifications"
+                >
+                  🔔
+                  {notifications.length > 0 && (
+                    <span className="absolute -right-1 -top-1 grid h-5 w-5 place-items-center rounded-full bg-emerald-500 text-[10px] font-semibold text-zinc-950">
+                      {Math.min(9, notifications.length)}
+                    </span>
+                  )}
+                </button>
+                {showNotifications && (
+                  <div className="absolute right-0 z-30 mt-2 w-72 rounded-2xl border border-zinc-800 bg-zinc-950 p-3 shadow-lg">
+                    <p className="text-xs uppercase tracking-[0.3em] text-zinc-500">Activity</p>
+                    <div className="mt-2 max-h-64 space-y-2 overflow-y-auto no-scrollbar">
+                      {notifications.length === 0 && <p className="text-xs text-zinc-500">No new activity yet.</p>}
+                      {notifications.slice(0, 12).map((item) => (
+                        <div key={item.id} className="rounded-xl border border-zinc-800 bg-zinc-900/60 p-2 text-xs text-zinc-300">
+                          <p className="font-semibold text-zinc-200">{item.actor_username || '@mirroruser'}</p>
+                          <p className="text-[11px] text-zinc-500">{formatRelativeTime(item.created_at)}</p>
+                          <p className="mt-1">
+                            {item.type === 'post_reacted' ? 'Reacted to your post' : 'Activity on your post'}
+                          </p>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
             </div>
             <div className="mt-3 flex gap-2 overflow-x-auto no-scrollbar">
               {moodItems.map((mood) => (
@@ -2835,7 +2935,7 @@ function App() {
               {roomMessage && <p className="rounded-xl border border-zinc-800 bg-zinc-900 px-3 py-2 text-xs text-zinc-300">{roomMessage}</p>}
 
               <div className="grid gap-4 lg:grid-cols-[280px_minmax(0,1fr)]">
-                <aside className="space-y-2 rounded-2xl border border-zinc-800 bg-zinc-900/60 p-3">
+                <aside className={`space-y-2 rounded-2xl border border-zinc-800 bg-zinc-900/60 p-3 ${selectedRoom ? 'hidden lg:block' : 'block'}`}>
                   <p className="text-xs uppercase tracking-[0.3em] text-zinc-500">Rooms</p>
                   <div className="rounded-xl border border-zinc-800 bg-zinc-950 px-3 py-2 text-sm">
                     <input
@@ -2862,23 +2962,31 @@ function App() {
                   ))}
                 </aside>
 
-                <div className="min-h-[40vh] rounded-2xl border border-zinc-800 bg-zinc-900/60 p-4">
-                  {!selectedRoom && <p className="text-sm text-zinc-400">Pick a room to see posts.</p>}
+                <div className="min-h-[60vh] rounded-2xl border border-zinc-800 bg-zinc-900/60 p-0">
+                  {!selectedRoom && <p className="p-4 text-sm text-zinc-400">Pick a room to see posts.</p>}
                   {selectedRoom && (
-                    <div className="space-y-4">
-                      <div className="flex flex-wrap items-center justify-between gap-3">
-                        <div>
-                          <p className="text-xs uppercase tracking-[0.3em] text-zinc-500">Room</p>
-                          <h3 className="text-lg font-semibold text-zinc-100">{selectedRoom.name}</h3>
-                          <p className="text-xs text-zinc-400">{selectedRoom.description || 'Anonymous room'}</p>
+                    <div className="flex h-full min-h-[60vh] flex-col">
+                      <div className="flex items-center gap-3 border-b border-zinc-800 bg-zinc-950/70 px-4 py-3">
+                        <button
+                          type="button"
+                          onClick={() => setSelectedRoom(null)}
+                          className="rounded-full border border-zinc-700 px-3 py-1 text-sm text-zinc-300 lg:hidden"
+                          aria-label="Back to rooms"
+                        >
+                          ←
+                        </button>
+                        <div className="min-w-0 flex-1">
+                          <p className="text-[11px] uppercase tracking-[0.3em] text-zinc-500">Anonymous Room</p>
+                          <h3 className="truncate text-base font-semibold text-zinc-100">{selectedRoom.name}</h3>
+                          <p className="truncate text-xs text-zinc-400">{selectedRoom.description || 'Anonymous room'}</p>
                         </div>
-                        <div className="text-xs text-zinc-500">
+                        <div className="text-[11px] text-zinc-500">
                           {roomMembers.length} members · TTL {selectedRoom.post_ttl_minutes || 60}m
                         </div>
                       </div>
 
                       {roomRequestStatus !== 'approved' && (
-                        <div className="rounded-xl border border-zinc-800 bg-zinc-950 p-3 text-xs text-zinc-300">
+                        <div className="border-b border-zinc-800 bg-zinc-950 p-3 text-xs text-zinc-300">
                           {roomRequestStatus === 'pending' && <p>Your request is pending approval.</p>}
                           {roomRequestStatus === 'rejected' && <p>Your request was rejected.</p>}
                           {!roomRequestStatus && (
@@ -2893,22 +3001,28 @@ function App() {
                         </div>
                       )}
 
-                      <div className="space-y-2">
+                      <div className="flex-1 space-y-2 overflow-y-auto p-4 no-scrollbar">
                         {roomLoading && <p className="text-xs text-zinc-500">Loading posts...</p>}
                         {!roomLoading && roomPosts.length === 0 && <p className="text-xs text-zinc-500">No posts yet.</p>}
-                        {roomPosts.map((post) => (
-                          <article key={post.id} className="post-enter rounded-xl border border-zinc-800 bg-zinc-950 p-3 text-sm text-zinc-200">
-                            <div className="flex items-center justify-between text-xs text-zinc-500">
-                              <span>{post.alias}</span>
-                              <span>{formatRelativeTime(post.created_at)}</span>
-                            </div>
-                            <p className="mt-2 text-sm text-zinc-100">{post.text}</p>
-                          </article>
-                        ))}
+                        {roomPosts
+                          .slice()
+                          .sort((a, b) => toMillis(a.created_at) - toMillis(b.created_at))
+                          .map((post) => (
+                            <article
+                              key={post.id}
+                              className="post-enter max-w-[85%] rounded-2xl border border-zinc-800 bg-zinc-950 p-3 text-sm text-zinc-200"
+                            >
+                              <div className="flex items-center justify-between text-[11px] text-zinc-500">
+                                <span>{post.alias}</span>
+                                <span>{formatRelativeTime(post.created_at)}</span>
+                              </div>
+                              <p className="mt-2 text-sm text-zinc-100">{post.text}</p>
+                            </article>
+                          ))}
                       </div>
 
                       {roomRequestStatus === 'approved' && (
-                        <form onSubmit={postToRoom} className="flex flex-wrap items-end gap-2 rounded-xl border border-zinc-800 bg-zinc-950 p-3">
+                        <form onSubmit={postToRoom} className="flex flex-wrap items-end gap-2 border-t border-zinc-800 bg-zinc-950 p-3">
                           <div className="flex-1">
                             <p className="text-[11px] text-zinc-500">Posting as {generateRoomAlias(selectedRoom.id, currentUserId)}</p>
                             <textarea
@@ -2930,14 +3044,21 @@ function App() {
                       )}
 
                       {selectedRoom.owner_id === currentUserId && roomRequests.length > 0 && (
-                        <div className="rounded-xl border border-zinc-800 bg-zinc-950 p-3">
+                        <div className="border-t border-zinc-800 bg-zinc-950 p-3">
                           <p className="text-xs uppercase tracking-[0.3em] text-zinc-500">Join requests</p>
                           <div className="mt-2 space-y-2">
                             {roomRequests
                               .filter((req) => req.status === 'pending')
                               .map((req) => (
                                 <div key={req.id} className="flex items-center justify-between rounded-lg border border-zinc-800 bg-zinc-900 px-3 py-2 text-xs">
-                                  <span className="text-zinc-300">{req.user_id}</span>
+                                  <div className="min-w-0">
+                                    <p className="truncate text-zinc-200">
+                                      {roomRequestProfiles[req.user_id]?.displayName || 'Mirror Student'}
+                                    </p>
+                                    <p className="truncate text-[11px] text-zinc-500">
+                                      {roomRequestProfiles[req.user_id]?.username || req.user_id}
+                                    </p>
+                                  </div>
                                   <div className="flex gap-2">
                                     <button
                                       type="button"
@@ -3021,8 +3142,13 @@ function App() {
                 <div className="mt-3 space-y-2">
                   {adminReports.filter((report) => report.status !== 'resolved').slice(0, 20).map((report) => (
                     <div key={report.id} className="rounded-xl border border-zinc-800 bg-zinc-950 p-3">
-                      <p className="text-xs text-zinc-400">Post: {report.post_id}</p>
-                      <p className="text-xs text-zinc-500">Reporter: {report.reporter_id}</p>
+                      <p className="text-xs text-zinc-400">
+                        Post: {adminPostsById[report.post_id]?.caption ? adminPostsById[report.post_id].caption.slice(0, 60) : report.post_id}
+                      </p>
+                      <p className="text-xs text-zinc-500">
+                        Reporter:{' '}
+                        {adminUsersById[report.reporter_id]?.displayName || adminUsersById[report.reporter_id]?.username || report.reporter_id}
+                      </p>
                       <div className="mt-2 flex flex-wrap gap-2">
                         <button type="button" onClick={() => setPostModerationStatus(report.post_id, 'hidden')} className="rounded-full border border-rose-500/40 px-3 py-1 text-xs text-rose-200">
                           Hide Post
