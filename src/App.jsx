@@ -2962,10 +2962,10 @@ function App() {
                   ))}
                 </aside>
 
-                <div className="min-h-[60vh] rounded-2xl border border-zinc-800 bg-zinc-900/60 p-0">
+                <div className="h-[72vh] rounded-2xl border border-zinc-800 bg-zinc-900/60 p-0 sm:h-[70vh] lg:h-[72vh]">
                   {!selectedRoom && <p className="p-4 text-sm text-zinc-400">Pick a room to see posts.</p>}
                   {selectedRoom && (
-                    <div className="flex h-full min-h-[60vh] flex-col">
+                    <div className="flex h-full flex-col">
                       <div className="flex items-center gap-3 border-b border-zinc-800 bg-zinc-950/70 px-4 py-3">
                         <button
                           type="button"
@@ -2985,7 +2985,7 @@ function App() {
                         </div>
                       </div>
 
-                      {roomRequestStatus !== 'approved' && (
+                      {!roomMemberExists && roomRequestStatus !== 'approved' && (
                         <div className="border-b border-zinc-800 bg-zinc-950 p-3 text-xs text-zinc-300">
                           {roomRequestStatus === 'pending' && <p>Your request is pending approval.</p>}
                           {roomRequestStatus === 'rejected' && <p>Your request was rejected.</p>}
@@ -3021,7 +3021,7 @@ function App() {
                           ))}
                       </div>
 
-                      {roomRequestStatus === 'approved' && (
+                      {roomMemberExists && (
                         <form onSubmit={postToRoom} className="flex flex-wrap items-end gap-2 border-t border-zinc-800 bg-zinc-950 p-3">
                           <div className="flex-1">
                             <p className="text-[11px] text-zinc-500">Posting as {generateRoomAlias(selectedRoom.id, currentUserId)}</p>
