@@ -581,6 +581,7 @@ function App() {
   const [pendingReactions, setPendingReactions] = useState({})
   const [pendingComments, setPendingComments] = useState({})
   const [showNotifications, setShowNotifications] = useState(false)
+  const [notificationsClearedAt, setNotificationsClearedAt] = useState(0)
   const [editProfileDraft, setEditProfileDraft] = useState({
     displayName: '',
     username: '',
@@ -1418,13 +1419,15 @@ function App() {
   }, [rooms, roomSearch])
 
   const visibleFeedPosts = useMemo(() => moodFilteredHomePosts.slice(0, feedVisibleCount), [moodFilteredHomePosts, feedVisibleCount])
-  const notifications = useMemo(
-    () =>
-      liveActivities.filter(
-        (item) => item.post_user_id === currentUserId && item.actor_id && item.actor_id !== currentUserId,
-      ),
-    [liveActivities, currentUserId],
-  )
+  const notifications = useMemo(() => {
+    const cutoff = notificationsClearedAt
+    return liveActivities.filter((item) => {
+      if (item.post_user_id !== currentUserId || !item.actor_id || item.actor_id === currentUserId) return false
+      if (!cutoff) return true
+      const createdAt = toMillis(item.created_at)
+      return createdAt > cutoff
+    })
+  }, [liveActivities, currentUserId, notificationsClearedAt])
   const adminUsersById = useMemo(() => {
     const map = {}
     adminUsers.forEach((entry) => {
@@ -1838,63 +1841,92 @@ function App() {
       ),
     )
 
-    try {
-      if (isFirebaseConfigured && !previewUser) {
-        const postRef = doc(db, 'picture_posts', postId)
-        await runTransaction(db, async (transaction) => {
-          const snap = await transaction.get(postRef)
-          if (!snap.exists()) return
-          const data = snap.data()
-          const dbReactedBy = normalizeReactedBy(data.reacted_by)
-          const dbReactionsCount = normalizeReactionCounts(data.reactions_count)
-          const dbCurrentReaction = dbReactedBy[currentUserId] || null
-          const dbRemoving = dbCurrentReaction === reactionKey
-          const dbNextReaction = dbRemoving ? null : reactionKey
-          if (dbCurrentReaction && dbReactionsCount[dbCurrentReaction] > 0) {
-            dbReactionsCount[dbCurrentReaction] -= 1
-          }
-          if (dbNextReaction) {
-            dbReactionsCount[dbNextReaction] += 1
-            dbReactedBy[currentUserId] = dbNextReaction
-          } else {
-            delete dbReactedBy[currentUserId]
-          }
-          const updatedEngagement = computeReactionTotal(dbReactionsCount)
-          const updatedSteeze = computeSteezeScore({
-            engagementCount: updatedEngagement,
-          })
-          transaction.update(postRef, {
-            engagement_count: updatedEngagement,
-            reactions_count: dbReactionsCount,
-            reacted_by: dbReactedBy,
-            steeze_score: updatedSteeze,
-          })
+    const persistReaction = async () => {
+      if (!isFirebaseConfigured || previewUser) return
+      const postRef = doc(db, 'picture_posts', postId)
+      await runTransaction(db, async (transaction) => {
+        const snap = await transaction.get(postRef)
+        if (!snap.exists()) return
+        const data = snap.data()
+        const dbReactedBy = normalizeReactedBy(data.reacted_by)
+        const dbReactionsCount = normalizeReactionCounts(data.reactions_count)
+        const dbCurrentReaction = dbReactedBy[currentUserId] || null
+        const dbRemoving = dbCurrentReaction === reactionKey
+        const dbNextReaction = dbRemoving ? null : reactionKey
+        if (dbCurrentReaction && dbReactionsCount[dbCurrentReaction] > 0) {
+          dbReactionsCount[dbCurrentReaction] -= 1
+        }
+        if (dbNextReaction) {
+          dbReactionsCount[dbNextReaction] += 1
+          dbReactedBy[currentUserId] = dbNextReaction
+        } else {
+          delete dbReactedBy[currentUserId]
+        }
+        const updatedEngagement = computeReactionTotal(dbReactionsCount)
+        const updatedSteeze = computeSteezeScore({
+          engagementCount: updatedEngagement,
         })
-        if (!isRemoving) {
+        transaction.update(postRef, {
+          engagement_count: updatedEngagement,
+          reactions_count: dbReactionsCount,
+          reacted_by: dbReactedBy,
+          steeze_score: updatedSteeze,
+        })
+      })
+      if (!isRemoving) {
+        try {
           await logActivity({
             type: 'post_reacted',
             post_id: postId,
             post_user_id: target.user_id,
             reaction_key: reactionKey,
           })
+        } catch (error) {
+          console.warn('Activity log failed', error)
+        }
+      }
+    }
+
+    try {
+      const retryableCodes = new Set(['aborted', 'unavailable', 'resource-exhausted', 'deadline-exceeded'])
+      let attempt = 0
+      while (attempt < 3) {
+        try {
+          await persistReaction()
+          break
+        } catch (error) {
+          const code = String(error?.code || '').toLowerCase()
+          attempt += 1
+          if (!retryableCodes.has(code) || attempt >= 3) {
+            throw error
+          }
+          await new Promise((resolve) => setTimeout(resolve, 250 * attempt))
         }
       }
     } catch (error) {
-      setPosts((prev) =>
-        prev.map((post) =>
-          post.id === postId
-            ? {
-                ...post,
-                reacted_by: currentReactedBy,
-                reactions_count: currentReactionsCount,
-                engagement_count: target.engagement_count || computeReactionTotal(currentReactionsCount),
-                steeze_score: target.steeze_score || computeSteezeScore({ engagementCount: computeReactionTotal(currentReactionsCount) }),
-              }
-            : post,
-        ),
-      )
-      console.error('Reaction error', error)
-      setMessage(getFriendlyErrorMessage(error, 'reaction'))
+      const code = String(error?.code || '').toLowerCase()
+      const retryableCodes = new Set(['aborted', 'unavailable', 'resource-exhausted', 'deadline-exceeded'])
+      if (retryableCodes.has(code)) {
+        setTimeout(() => {
+          persistReaction().catch((retryError) => console.warn('Reaction retry failed', retryError))
+        }, 1500)
+      } else {
+        setPosts((prev) =>
+          prev.map((post) =>
+            post.id === postId
+              ? {
+                  ...post,
+                  reacted_by: currentReactedBy,
+                  reactions_count: currentReactionsCount,
+                  engagement_count: target.engagement_count || computeReactionTotal(currentReactionsCount),
+                  steeze_score: target.steeze_score || computeSteezeScore({ engagementCount: computeReactionTotal(currentReactionsCount) }),
+                }
+              : post,
+          ),
+        )
+        console.error('Reaction error', error)
+        setMessage(getFriendlyErrorMessage(error, 'reaction'))
+      }
     } finally {
       setPendingReactions((prev) => {
         const next = { ...prev }
@@ -2630,7 +2662,16 @@ function App() {
                 </button>
                 {showNotifications && (
                   <div className="absolute right-0 z-30 mt-2 w-72 rounded-2xl border border-zinc-800 bg-zinc-950 p-3 shadow-lg">
-                    <p className="text-xs uppercase tracking-[0.3em] text-zinc-500">Activity</p>
+                    <div className="flex items-center justify-between">
+                      <p className="text-xs uppercase tracking-[0.3em] text-zinc-500">Activity</p>
+                      <button
+                        type="button"
+                        onClick={() => setNotificationsClearedAt(Date.now())}
+                        className="rounded-full border border-zinc-800 px-2 py-1 text-[10px] text-zinc-400"
+                      >
+                        Clear
+                      </button>
+                    </div>
                     <div className="mt-2 max-h-64 space-y-2 overflow-y-auto no-scrollbar">
                       {notifications.length === 0 && <p className="text-xs text-zinc-500">No new activity yet.</p>}
                       {notifications.slice(0, 12).map((item) => (
@@ -2676,11 +2717,23 @@ function App() {
             </div>
           </header>
 
-          {message && <p className="rounded-xl border border-zinc-800 bg-zinc-900 px-3 py-2 text-xs text-zinc-300">{message}</p>}
           {actionToast && (
             <div className="fixed right-4 top-4 z-50 rounded-xl border border-emerald-500/50 bg-emerald-500/15 px-4 py-3 text-xs text-emerald-100 shadow-[0_0_20px_rgba(16,185,129,0.35)]">
               <p className="font-semibold">Action completed</p>
               <p className="mt-0.5">{actionToast}</p>
+            </div>
+          )}
+          {message && isAuthed && (
+            <div className="fixed right-4 top-20 z-50 rounded-xl border border-rose-500/40 bg-rose-500/10 px-4 py-3 text-xs text-rose-100 shadow-[0_0_20px_rgba(244,63,94,0.25)]">
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <p className="font-semibold">Notice</p>
+                  <p className="mt-0.5">{message}</p>
+                </div>
+                <button type="button" onClick={() => setMessage('')} className="text-[11px] text-rose-200">
+                  ✕
+                </button>
+              </div>
             </div>
           )}
           {profile.suspended && (

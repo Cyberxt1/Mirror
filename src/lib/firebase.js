@@ -1,6 +1,6 @@
 import { initializeApp } from 'firebase/app'
 import { getAuth, GoogleAuthProvider } from 'firebase/auth'
-import { getFirestore } from 'firebase/firestore'
+import { enableIndexedDbPersistence, getFirestore } from 'firebase/firestore'
 import { getToken as getAppCheckTokenInternal, initializeAppCheck, ReCaptchaV3Provider } from 'firebase/app-check'
 
 const firebaseConfig = {
@@ -30,6 +30,15 @@ if (isFirebaseConfigured) {
   auth = getAuth(app)
   db = getFirestore(app)
   googleProvider = new GoogleAuthProvider()
+  enableIndexedDbPersistence(db).catch((error) => {
+    if (error?.code === 'failed-precondition') {
+      console.warn('Firestore persistence disabled: multiple tabs open.')
+    } else if (error?.code === 'unimplemented') {
+      console.warn('Firestore persistence not supported in this browser.')
+    } else {
+      console.warn('Firestore persistence error:', error)
+    }
+  })
 
   const appCheckKey = import.meta.env.VITE_FIREBASE_APPCHECK_SITE_KEY
   if (appCheckKey && !shouldBypassAppCheck) {
