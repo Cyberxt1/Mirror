@@ -2699,7 +2699,11 @@ function App() {
                       )}
                       <div className="absolute left-4 bottom-4 max-w-[90%] space-y-2">
                         <p className="text-sm text-zinc-100">{post.caption}</p>
-                        <span className="inline-block rounded-full bg-zinc-950/70 px-3 py-1 text-xs text-emerald-200">{getSteezeTier(post.steeze_score || 0)}</span>
+                        {getSteezeTier(post.steeze_score || 0) !== '🌱 Fresh' && (
+                          <span className="inline-block rounded-full bg-zinc-950/70 px-3 py-1 text-xs text-emerald-200">
+                            {getSteezeTier(post.steeze_score || 0)}
+                          </span>
+                        )}
                       </div>
                     </div>
                     <div className="flex h-full flex-col gap-3 p-4">
