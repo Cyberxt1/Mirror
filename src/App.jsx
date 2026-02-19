@@ -1119,7 +1119,22 @@ function App() {
       setRoomRequestProfiles({})
       return
     }
+    setRoomPosts([])
     setRoomLoading(true)
+    if (selectedRoom.owner_id === currentUserId) {
+      const memberDocId = `${selectedRoom.id}_${currentUserId}`
+      setDoc(
+        doc(db, 'room_members', memberDocId),
+        {
+          room_id: selectedRoom.id,
+          user_id: currentUserId,
+          joined_at: serverTimestamp(),
+        },
+        { merge: true },
+      ).catch((error) => {
+        console.error('Owner membership ensure error', error)
+      })
+    }
     const postQuery = query(
       collection(db, 'room_posts'),
       where('room_id', '==', selectedRoom.id),
@@ -2205,6 +2220,15 @@ function App() {
         created_at: serverTimestamp(),
       }
       const docRef = await addDoc(collection(db, 'rooms'), payload)
+      await setDoc(
+        doc(db, 'room_members', `${docRef.id}_${currentUserId}`),
+        {
+          room_id: docRef.id,
+          user_id: currentUserId,
+          joined_at: serverTimestamp(),
+        },
+        { merge: true },
+      )
       setRoomDraft({ name: '', description: '', postTtl: 60 })
       setShowCreateRoom(false)
       setSelectedRoom({ id: docRef.id, ...payload, created_at: Date.now() })
