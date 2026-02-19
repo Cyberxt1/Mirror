@@ -1,11 +1,12 @@
 ﻿
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useDeferredValue, useEffect, useMemo, useRef, useState } from 'react'
 import {
   createUserWithEmailAndPassword,
   getIdToken,
   onAuthStateChanged,
   signInWithEmailAndPassword,
   signInWithPopup,
+  signInWithRedirect,
   signOut as firebaseSignOut,
 } from 'firebase/auth'
 import {
@@ -546,6 +547,8 @@ function App() {
   const [deleteConfirmPostId, setDeleteConfirmPostId] = useState(null)
   const [postActionsPostId, setPostActionsPostId] = useState(null)
   const [actionToast, setActionToast] = useState(null)
+  const [pendingReactions, setPendingReactions] = useState({})
+  const [pendingComments, setPendingComments] = useState({})
 
   const baseProfile = {
     displayName: 'Mirror Student',
@@ -598,6 +601,7 @@ function App() {
   const adminOwnerEmail = 'oluokundavid4@gmail.com'
   const isAdminOwnerEmail = (currentUser?.email || '').toLowerCase() === adminOwnerEmail
   const canUseAdminUI = isAdmin && isAdminOwnerEmail
+  const deferredSearchQuery = useDeferredValue(searchQuery)
 
   useEffect(() => {
     if (activeTab === 'admin' && !canUseAdminUI) {
@@ -1147,7 +1151,7 @@ function App() {
   }, [homePosts, selectedHashtag])
 
   const filteredPosts = useMemo(() => {
-    const queryText = searchQuery.trim().toLowerCase()
+    const queryText = deferredSearchQuery.trim().toLowerCase()
     if (!queryText) return homePosts
     return homePosts.filter((post) => {
       const haystack = [
@@ -1160,7 +1164,7 @@ function App() {
         .toLowerCase()
       return haystack.includes(queryText)
     })
-  }, [homePosts, searchQuery])
+  }, [homePosts, deferredSearchQuery])
 
   const visibleFeedPosts = useMemo(() => moodFilteredHomePosts.slice(0, feedVisibleCount), [moodFilteredHomePosts, feedVisibleCount])
 
@@ -1242,7 +1246,23 @@ function App() {
       setMessage('Welcome back.')
     } catch (error) {
       console.error('Google auth error', error)
-      setMessage(getFriendlyErrorMessage(error, 'auth'))
+      const code = String(error?.code || '').toLowerCase()
+      if (
+        code === 'auth/popup-blocked' ||
+        code === 'auth/popup-closed-by-user' ||
+        code === 'auth/operation-not-supported-in-this-environment'
+      ) {
+        try {
+          await signInWithRedirect(auth, googleProvider)
+          setMessage('Continue in the new tab to sign in.')
+          return
+        } catch (redirectError) {
+          console.error('Google redirect error', redirectError)
+          setMessage(getFriendlyErrorMessage(redirectError, 'auth'))
+        }
+      } else {
+        setMessage(getFriendlyErrorMessage(error, 'auth'))
+      }
     } finally {
       setLoading(false)
     }
@@ -1358,6 +1378,41 @@ function App() {
 
     setIsPublishing(true)
 
+    const reactionsCount = createEmptyReactionCounts()
+    const engagementCount = 0
+    const extractedTags = Array.from(new Set((draftPost.caption.match(/#([a-zA-Z0-9_]+)/g) || []).map((item) => item.replace('#', ''))))
+    const steeze = computeSteezeScore({
+      engagementCount,
+    })
+    const authorFields = buildPostAuthorFields()
+
+    const tempId = `local-post-${Date.now()}`
+    const optimisticPost = {
+      id: tempId,
+      user_id: currentUserId,
+      image_url: previewUrl || '',
+      caption: draftPost.caption.trim(),
+      tags: extractedTags,
+      engagement_count: engagementCount,
+      reactions_count: reactionsCount,
+      reacted_by: {},
+      comments_count: 0,
+      comments: [],
+      views_count: 0,
+      steeze_score: steeze,
+      campus_id: campusId,
+      ...authorFields,
+      media_type: mediaType,
+      thumbnail_url: thumbnailUrl,
+      public_id: publicId,
+      moderated_status: 'active',
+      flags_count: 0,
+      created_at: Date.now(),
+      delivery_status: 'sending',
+    }
+    setPosts((prev) => [optimisticPost, ...prev])
+    setShowComposer(false)
+
     if (selectedFile) {
       try {
         setUploading(true)
@@ -1371,9 +1426,23 @@ function App() {
         mediaType = uploaded.mediaType
         thumbnailUrl = ''
         publicId = uploaded.publicId
+        setPosts((prev) =>
+          prev.map((post) =>
+            post.id === tempId
+              ? {
+                  ...post,
+                  image_url: mediaUrl,
+                  media_type: mediaType,
+                  thumbnail_url: thumbnailUrl,
+                  public_id: publicId,
+                }
+              : post,
+          ),
+        )
         setUploadStatus('Upload complete.')
       } catch (error) {
         console.error('Upload error', error)
+        setPosts((prev) => prev.filter((post) => post.id !== tempId))
         setMessage(getFriendlyErrorMessage(error, 'upload'))
         setUploading(false)
         setIsPublishing(false)
@@ -1382,14 +1451,6 @@ function App() {
         setUploading(false)
       }
     }
-
-    const reactionsCount = createEmptyReactionCounts()
-    const engagementCount = 0
-    const extractedTags = Array.from(new Set((draftPost.caption.match(/#([a-zA-Z0-9_]+)/g) || []).map((item) => item.replace('#', ''))))
-    const steeze = computeSteezeScore({
-      engagementCount,
-    })
-    const authorFields = buildPostAuthorFields()
 
     const postPayload = {
       user_id: currentUserId,
@@ -1412,10 +1473,6 @@ function App() {
       flags_count: 0,
     }
 
-    const tempId = `local-post-${Date.now()}`
-    const optimisticPost = { id: tempId, ...postPayload, created_at: Date.now() }
-    setPosts((prev) => [optimisticPost, ...prev])
-
     try {
       if (isFirebaseConfigured && !previewUser) {
         const docRef = await addDoc(collection(db, 'picture_posts'), {
@@ -1427,17 +1484,36 @@ function App() {
           post_id: docRef.id,
           post_user_id: currentUserId,
         })
-        setPosts((prev) => prev.map((post) => (post.id === tempId ? { ...post, id: docRef.id } : post)))
+        setPosts((prev) =>
+          prev.map((post) =>
+            post.id === tempId
+              ? {
+                  ...post,
+                  id: docRef.id,
+                  delivery_status: 'sent',
+                }
+              : post,
+          ),
+        )
       }
       setDraftPost(emptyPost)
       setSelectedFile(null)
       setPreviewUrl('')
       setShowComposer(false)
-      showActionToast('Post published.')
+      showActionToast('Post sent.')
       setUploadProgress(0)
       setUploadStatus('')
     } catch (error) {
-      setPosts((prev) => prev.filter((post) => post.id !== tempId))
+      setPosts((prev) =>
+        prev.map((post) =>
+          post.id === tempId
+            ? {
+                ...post,
+                delivery_status: 'failed',
+              }
+            : post,
+        ),
+      )
       console.error('Publish error', error)
       setMessage(getFriendlyErrorMessage(error, 'publish'))
     } finally {
@@ -1450,6 +1526,7 @@ function App() {
     const target = posts.find((post) => post.id === postId)
     if (!target || !currentUserId) return
     if (!assertCanInteract()) return
+    if (pendingReactions[postId]) return
     const currentReactedBy = normalizeReactedBy(target.reacted_by)
     const currentReactionsCount = normalizeReactionCounts(target.reactions_count)
     const currentReaction = currentReactedBy[currentUserId] || null
@@ -1472,6 +1549,8 @@ function App() {
     const nextSteeze = computeSteezeScore({
       engagementCount: nextEngagement,
     })
+
+    setPendingReactions((prev) => ({ ...prev, [postId]: true }))
 
     setPosts((prev) =>
       prev.map((post) =>
@@ -1544,6 +1623,12 @@ function App() {
       )
       console.error('Reaction error', error)
       setMessage(getFriendlyErrorMessage(error, 'reaction'))
+    } finally {
+      setPendingReactions((prev) => {
+        const next = { ...prev }
+        delete next[postId]
+        return next
+      })
     }
   }
 
@@ -1551,6 +1636,7 @@ function App() {
     const target = posts.find((post) => post.id === postId)
     if (!target || target.media_type === 'text') return
     if (!assertCanInteract()) return
+    if (pendingComments[postId]) return
     const text = (reflectionCommentDrafts[postId] || '').trim()
     if (!text || !currentUserId) return
 
@@ -1583,9 +1669,10 @@ function App() {
     showActionToast('Comment added.')
     setReflectionCommentDrafts((prev) => ({ ...prev, [postId]: '' }))
 
-    if (isFirebaseConfigured && !previewUser) {
-      const postRef = doc(db, 'picture_posts', postId)
-      try {
+    setPendingComments((prev) => ({ ...prev, [postId]: true }))
+    try {
+      if (isFirebaseConfigured && !previewUser) {
+        const postRef = doc(db, 'picture_posts', postId)
         await runTransaction(db, async (transaction) => {
           const snap = await transaction.get(postRef)
           if (!snap.exists()) return
@@ -1598,10 +1685,16 @@ function App() {
             comments_count: updatedComments.length,
           })
         })
-      } catch (error) {
-        console.error('Comment error', error)
-        setMessage(getFriendlyErrorMessage(error, 'comment'))
       }
+    } catch (error) {
+      console.error('Comment error', error)
+      setMessage(getFriendlyErrorMessage(error, 'comment'))
+    } finally {
+      setPendingComments((prev) => {
+        const next = { ...prev }
+        delete next[postId]
+        return next
+      })
     }
   }
 
@@ -1802,6 +1895,7 @@ function App() {
   }
 
   async function uploadProfileAvatar(event) {
+    if (avatarUploading) return
     const file = event.target.files?.[0]
     if (!file) return
     const validation = validateMediaFile(file)
@@ -2143,6 +2237,7 @@ function App() {
                 const reactionsCount = normalizeReactionCounts(post.reactions_count)
                 const hashtagText = (post.tags || []).map((tag) => `#${tag}`).join(' ')
                 const author = resolvePostAuthor(post)
+                const isReacting = Boolean(pendingReactions[post.id])
                 return (
                   <article key={post.id} className="overflow-hidden rounded-2xl border border-zinc-800/80 bg-zinc-900/70">
                     <div className="flex items-center justify-between gap-3 px-4 py-3">
@@ -2167,6 +2262,12 @@ function App() {
                           </p>
                         </div>
                       </button>
+                      {post.delivery_status === 'sending' && (
+                        <span className="rounded-full border border-amber-500/40 bg-amber-500/10 px-2 py-1 text-[11px] text-amber-200">Sending…</span>
+                      )}
+                      {post.delivery_status === 'failed' && (
+                        <span className="rounded-full border border-rose-500/40 bg-rose-500/10 px-2 py-1 text-[11px] text-rose-200">Send failed</span>
+                      )}
                     </div>
 
                     <div className="space-y-3 px-4 pb-4">
@@ -2180,9 +2281,10 @@ function App() {
                             key={`${post.id}-${reaction.key}`}
                             type="button"
                             onClick={() => reactToPost(post.id, reaction.key)}
+                            disabled={isReacting}
                             className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1.5 transition ${
                               myReaction === reaction.key ? 'border-emerald-500/60 bg-emerald-500/10 text-emerald-100' : 'border-zinc-700 text-zinc-200'
-                            }`}
+                            } ${isReacting ? 'opacity-60' : ''}`}
                           >
                             <span>{reaction.emoji}</span>
                             <span>{reactionsCount[reaction.key] || 0}</span>
@@ -2236,6 +2338,8 @@ function App() {
                 <article key={post.id} className="overflow-hidden rounded-3xl border border-zinc-800 bg-zinc-900">
                   {(() => {
                     const author = resolvePostAuthor(post)
+                    const isReacting = Boolean(pendingReactions[post.id])
+                    const isCommenting = Boolean(pendingComments[post.id])
                     return (
                   <div className="grid lg:grid-cols-2">
                     <div className="relative h-[56vh] w-full bg-zinc-950 sm:h-[66vh] lg:h-[72vh]">
@@ -2252,6 +2356,16 @@ function App() {
                       >
                         {author.label} · {formatRelativeTime(post.created_at)}
                       </button>
+                      {post.delivery_status === 'sending' && (
+                        <span className="absolute right-4 top-4 rounded-full border border-amber-500/40 bg-amber-500/10 px-2 py-1 text-[11px] text-amber-200">
+                          Sending…
+                        </span>
+                      )}
+                      {post.delivery_status === 'failed' && (
+                        <span className="absolute right-4 top-4 rounded-full border border-rose-500/40 bg-rose-500/10 px-2 py-1 text-[11px] text-rose-200">
+                          Send failed
+                        </span>
+                      )}
                       <div className="absolute left-4 bottom-4 max-w-[90%] space-y-2">
                         <p className="text-sm text-zinc-100">{post.caption}</p>
                         <span className="inline-block rounded-full bg-zinc-950/70 px-3 py-1 text-xs text-emerald-200">{getSteezeTier(post.steeze_score || 0)}</span>
@@ -2264,9 +2378,10 @@ function App() {
                             key={`reflect-${post.id}-${reaction.key}`}
                             type="button"
                             onClick={() => reactToPost(post.id, reaction.key)}
+                            disabled={isReacting}
                             className={`inline-flex items-center gap-1 rounded-full border px-2.5 py-1.5 ${
                               post.reacted_by?.[currentUserId] === reaction.key ? 'border-emerald-500/60 bg-emerald-500/10 text-emerald-100' : 'border-zinc-700 text-zinc-200'
-                            }`}
+                            } ${isReacting ? 'opacity-60' : ''}`}
                           >
                             <span>{reaction.emoji}</span>
                             <span>{normalizeReactionCounts(post.reactions_count)[reaction.key] || 0}</span>
@@ -2346,8 +2461,13 @@ function App() {
                           placeholder="Comment on this reflection..."
                           className="w-full rounded-lg border border-zinc-700 bg-zinc-950 px-3 py-2 text-sm"
                         />
-                        <button type="button" onClick={() => addReflectionComment(post.id)} className="rounded-lg bg-emerald-500 px-3 py-2 text-xs font-semibold text-zinc-950">
-                          Send
+                        <button
+                          type="button"
+                          onClick={() => addReflectionComment(post.id)}
+                          disabled={isCommenting}
+                          className={`rounded-lg bg-emerald-500 px-3 py-2 text-xs font-semibold text-zinc-950 ${isCommenting ? 'opacity-60' : ''}`}
+                        >
+                          {isCommenting ? 'Sending...' : 'Send'}
                         </button>
                       </div>
                     </div>
