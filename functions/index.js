@@ -19,6 +19,7 @@ const maxImageBytes = 10 * 1024 * 1024
 const maxVideoBytes = 60 * 1024 * 1024
 const feedWindowHours = 24
 const cleanupBatchSize = 400
+const roomCleanupBatchSize = 400
 
 cloudinary.config({
   cloud_name: cloudName,
@@ -121,4 +122,29 @@ export const cleanupExpiredPosts = onSchedule('every 15 minutes', async () => {
   }
 
   console.log(`cleanupExpiredPosts deleted ${deletedCount} post(s) older than ${feedWindowHours}h`)
+})
+
+export const cleanupExpiredRoomPosts = onSchedule('every 10 minutes', async () => {
+  const db = getFirestore()
+  const cutoff = Timestamp.now()
+  let deletedCount = 0
+
+  while (true) {
+    const snap = await db
+      .collection('room_posts')
+      .where('expires_at', '<=', cutoff)
+      .limit(roomCleanupBatchSize)
+      .get()
+
+    if (snap.empty) break
+
+    const batch = db.batch()
+    snap.docs.forEach((docSnap) => batch.delete(docSnap.ref))
+    await batch.commit()
+    deletedCount += snap.size
+
+    if (snap.size < roomCleanupBatchSize) break
+  }
+
+  console.log(`cleanupExpiredRoomPosts deleted ${deletedCount} room post(s)`)
 })

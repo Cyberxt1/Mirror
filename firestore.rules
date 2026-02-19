@@ -14,6 +14,27 @@ service cloud.firestore {
         && exists(/databases/$(database)/documents/admins/$(request.auth.uid));
     }
 
+    function isRoomCreatorEmail() {
+      return isSignedIn()
+        && request.auth.token.email != null
+        && exists(/databases/$(database)/documents/room_creators/$(request.auth.token.email));
+    }
+
+    function canCreateRoom() {
+      return isAdmin() || isRoomCreatorEmail();
+    }
+
+    function isRoomOwner(roomId) {
+      return isSignedIn()
+        && exists(/databases/$(database)/documents/rooms/$(roomId))
+        && get(/databases/$(database)/documents/rooms/$(roomId)).data.owner_id == request.auth.uid;
+    }
+
+    function isRoomMember(roomId) {
+      return isSignedIn()
+        && exists(/databases/$(database)/documents/room_members/$(roomId + '_' + request.auth.uid));
+    }
+
     match /users/{userId} {
       allow read: if isSignedIn();
       allow create: if isOwner(userId);
@@ -155,6 +176,114 @@ service cloud.firestore {
       allow create: if isSignedIn() && request.resource.data.followerId == request.auth.uid;
       allow delete: if isSignedIn() && (
         resource.data.followerId == request.auth.uid || isAdmin()
+      );
+      allow update: if false;
+    }
+
+    match /room_creators/{email} {
+      allow read: if isAdmin();
+      allow create, update, delete: if isAdmin();
+    }
+
+    match /rooms/{roomId} {
+      allow read: if isSignedIn();
+      allow create: if isSignedIn()
+        && canCreateRoom()
+        && request.resource.data.owner_id == request.auth.uid
+        && request.resource.data.name is string
+        && request.resource.data.name.size() >= 2
+        && request.resource.data.name.size() <= 60
+        && request.resource.data.description is string
+        && request.resource.data.description.size() <= 240
+        && request.resource.data.join_mode == 'request'
+        && request.resource.data.post_ttl_minutes is int
+        && request.resource.data.post_ttl_minutes >= 30
+        && request.resource.data.post_ttl_minutes <= 10080
+        && request.resource.data.created_at is timestamp
+        && request.resource.data.keys().hasOnly([
+          'name',
+          'description',
+          'owner_id',
+          'owner_email',
+          'join_mode',
+          'post_ttl_minutes',
+          'created_at'
+        ]);
+      allow update: if isRoomOwner(roomId)
+        && request.resource.data.diff(resource.data).changedKeys().hasOnly([
+          'description',
+          'post_ttl_minutes'
+        ])
+        && request.resource.data.post_ttl_minutes is int
+        && request.resource.data.post_ttl_minutes >= 30
+        && request.resource.data.post_ttl_minutes <= 10080;
+      allow delete: if isAdmin() || isRoomOwner(roomId);
+    }
+
+    match /room_requests/{requestId} {
+      allow read: if isSignedIn();
+      allow create: if isSignedIn()
+        && request.resource.data.user_id == request.auth.uid
+        && request.resource.data.room_id is string
+        && request.resource.data.status == 'pending'
+        && request.resource.data.created_at is timestamp
+        && request.resource.data.updated_at is timestamp
+        && request.resource.data.keys().hasOnly([
+          'room_id',
+          'user_id',
+          'status',
+          'created_at',
+          'updated_at'
+        ]);
+      allow update: if isRoomOwner(request.resource.data.room_id)
+        && request.resource.data.diff(resource.data).changedKeys().hasOnly([
+          'status',
+          'updated_at'
+        ])
+        && request.resource.data.status in ['approved', 'rejected'];
+      allow delete: if isAdmin() || isRoomOwner(resource.data.room_id);
+    }
+
+    match /room_members/{memberId} {
+      allow read: if isSignedIn();
+      allow create: if isRoomOwner(request.resource.data.room_id)
+        && request.resource.data.user_id is string
+        && request.resource.data.room_id is string
+        && request.resource.data.joined_at is timestamp
+        && request.resource.data.keys().hasOnly([
+          'room_id',
+          'user_id',
+          'joined_at'
+        ]);
+      allow delete: if isAdmin() || isRoomOwner(resource.data.room_id) || (
+        isSignedIn() && resource.data.user_id == request.auth.uid
+      );
+      allow update: if false;
+    }
+
+    match /room_posts/{postId} {
+      allow read: if isRoomMember(resource.data.room_id) || isRoomOwner(resource.data.room_id);
+      allow create: if isRoomMember(request.resource.data.room_id)
+        && request.resource.data.user_id == request.auth.uid
+        && request.resource.data.room_id is string
+        && request.resource.data.text is string
+        && request.resource.data.text.size() >= 1
+        && request.resource.data.text.size() <= 500
+        && request.resource.data.alias is string
+        && request.resource.data.alias.size() >= 2
+        && request.resource.data.alias.size() <= 40
+        && request.resource.data.created_at is timestamp
+        && request.resource.data.expires_at is timestamp
+        && request.resource.data.keys().hasOnly([
+          'room_id',
+          'user_id',
+          'text',
+          'alias',
+          'created_at',
+          'expires_at'
+        ]);
+      allow delete: if isAdmin() || isRoomOwner(resource.data.room_id) || (
+        isSignedIn() && resource.data.user_id == request.auth.uid
       );
       allow update: if false;
     }

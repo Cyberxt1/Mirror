@@ -49,6 +49,18 @@ const reactionTypes = [
 ]
 
 const reactionKeys = reactionTypes.map((item) => item.key)
+const roomAliasFirst = ['Brain', 'Pixel', 'Ghost', 'Velvet', 'Cosmic', 'Sunny', 'Midnight', 'Nova', 'Chill', 'Bold', 'Lucky', 'Quiet']
+const roomAliasSecond = ['Deer', 'Panda', 'Viper', 'Otter', 'Raven', 'Koala', 'Lynx', 'Finch', 'Tiger', 'Cobra', 'Shark', 'Fox']
+const roomTtlOptions = [
+  { label: '30 minutes', value: 30 },
+  { label: '1 hour', value: 60 },
+  { label: '3 hours', value: 180 },
+  { label: '6 hours', value: 360 },
+  { label: '12 hours', value: 720 },
+  { label: '24 hours', value: 1440 },
+  { label: '3 days', value: 4320 },
+  { label: '7 days', value: 10080 },
+]
 const departmentsByFaculty = [
   { faculty: 'Law', items: ['Law'] },
   { faculty: 'Science', items: ['Computer Science', 'Mathematics', 'Physics', 'Chemistry', 'Biology', 'Microbiology', 'Statistics', 'Geology'] },
@@ -111,6 +123,14 @@ function generatePrivateAlias(userId) {
   const b = second[Math.floor(hash / first.length) % second.length]
   const suffix = String(userId || '0000').slice(-4).toLowerCase()
   return `${a} ${b} ${suffix}`.trim()
+}
+
+function generateRoomAlias(roomId, userId) {
+  const seed = `${roomId || 'room'}:${userId || 'anon'}`
+  const hash = hashText(seed)
+  const first = roomAliasFirst[hash % roomAliasFirst.length]
+  const second = roomAliasSecond[Math.floor(hash / roomAliasFirst.length) % roomAliasSecond.length]
+  return `${first} ${second}`
 }
 
 function createEmptyReactionCounts() {
@@ -528,6 +548,21 @@ function App() {
   const [adminIds, setAdminIds] = useState([])
   const [liveActivities, setLiveActivities] = useState([])
   const [copiedUid, setCopiedUid] = useState(false)
+  const [rooms, setRooms] = useState([])
+  const [selectedRoom, setSelectedRoom] = useState(null)
+  const [roomPosts, setRoomPosts] = useState([])
+  const [roomLoading, setRoomLoading] = useState(false)
+  const [roomMessage, setRoomMessage] = useState('')
+  const [roomRequestStatus, setRoomRequestStatus] = useState(null)
+  const [roomRequests, setRoomRequests] = useState([])
+  const [roomMembers, setRoomMembers] = useState([])
+  const [roomDraft, setRoomDraft] = useState({ name: '', description: '', postTtl: 60 })
+  const [roomPostDraft, setRoomPostDraft] = useState('')
+  const [roomSearch, setRoomSearch] = useState('')
+  const [showCreateRoom, setShowCreateRoom] = useState(false)
+  const [canCreateRooms, setCanCreateRooms] = useState(false)
+  const [isCreatingRoom, setIsCreatingRoom] = useState(false)
+  const [isPostingRoom, setIsPostingRoom] = useState(false)
 
   const [selectedFile, setSelectedFile] = useState(null)
   const [previewUrl, setPreviewUrl] = useState('')
@@ -1016,6 +1051,126 @@ function App() {
   }, [isAuthed, currentUserId, followingIds, previewUser])
 
   useEffect(() => {
+    if (!isAuthed || !isFirebaseConfigured || previewUser || !currentUser?.email) {
+      setCanCreateRooms(false)
+      return
+    }
+    if (isAdmin) {
+      setCanCreateRooms(true)
+      return
+    }
+    const emailKey = String(currentUser.email || '').trim().toLowerCase()
+    if (!emailKey) {
+      setCanCreateRooms(false)
+      return
+    }
+    const creatorRef = doc(db, 'room_creators', emailKey)
+    const unsubscribe = onSnapshot(
+      creatorRef,
+      (snap) => setCanCreateRooms(snap.exists()),
+      () => setCanCreateRooms(false),
+    )
+    return () => unsubscribe()
+  }, [isAuthed, previewUser, currentUser?.email, isAdmin])
+
+  useEffect(() => {
+    if (!isAuthed || !isFirebaseConfigured || previewUser) {
+      setRooms([])
+      return
+    }
+    const roomsQuery = query(collection(db, 'rooms'), orderBy('created_at', 'desc'), limit(80))
+    const unsubscribe = onSnapshot(
+      roomsQuery,
+      (snap) => {
+        const rows = snap.docs.map((docSnap) => ({ id: docSnap.id, ...docSnap.data() }))
+        setRooms(rows)
+      },
+      (error) => {
+        console.error('Rooms snapshot error', error)
+        setRoomMessage(getFriendlyErrorMessage(error, 'general'))
+      },
+    )
+    return () => unsubscribe()
+  }, [isAuthed, previewUser])
+
+  useEffect(() => {
+    if (!selectedRoom?.id || !isAuthed || !isFirebaseConfigured || previewUser) {
+      setRoomPosts([])
+      setRoomRequestStatus(null)
+      setRoomRequests([])
+      setRoomMembers([])
+      return
+    }
+    setRoomLoading(true)
+    const postQuery = query(
+      collection(db, 'room_posts'),
+      where('room_id', '==', selectedRoom.id),
+      orderBy('created_at', 'desc'),
+      limit(200),
+    )
+    const requestsQuery = query(
+      collection(db, 'room_requests'),
+      where('room_id', '==', selectedRoom.id),
+      orderBy('created_at', 'desc'),
+      limit(200),
+    )
+    const memberDocId = `${selectedRoom.id}_${currentUserId}`
+    const memberRef = doc(db, 'room_members', memberDocId)
+
+    const unsubPosts = onSnapshot(
+      postQuery,
+      (snap) => {
+        const rows = snap.docs
+          .map((docSnap) => ({ id: docSnap.id, ...docSnap.data() }))
+          .filter((post) => {
+            const expiresAt = toMillis(post.expires_at)
+            return !expiresAt || expiresAt > Date.now()
+          })
+        setRoomPosts(rows)
+        setRoomLoading(false)
+      },
+      (error) => {
+        console.error('Room posts error', error)
+        setRoomMessage(getFriendlyErrorMessage(error, 'general'))
+        setRoomLoading(false)
+      },
+    )
+
+    const unsubMember = onSnapshot(
+      memberRef,
+      (snap) => setRoomRequestStatus(snap.exists() ? 'approved' : null),
+      () => setRoomRequestStatus(null),
+    )
+
+    const unsubRequests = onSnapshot(
+      requestsQuery,
+      (snap) => {
+        const rows = snap.docs.map((docSnap) => ({ id: docSnap.id, ...docSnap.data() }))
+        setRoomRequests(rows)
+        const myRequest = rows.find((row) => row.user_id === currentUserId)
+        if (myRequest && myRequest.status && myRequest.status !== 'approved') {
+          setRoomRequestStatus(myRequest.status)
+        }
+      },
+      () => setRoomRequests([]),
+    )
+
+    const membersQuery = query(collection(db, 'room_members'), where('room_id', '==', selectedRoom.id), limit(300))
+    const unsubMembers = onSnapshot(
+      membersQuery,
+      (snap) => setRoomMembers(snap.docs.map((docSnap) => ({ id: docSnap.id, ...docSnap.data() }))),
+      () => setRoomMembers([]),
+    )
+
+    return () => {
+      unsubPosts()
+      unsubMember()
+      unsubRequests()
+      unsubMembers()
+    }
+  }, [selectedRoom?.id, isAuthed, currentUserId, previewUser])
+
+  useEffect(() => {
     if (!profileViewId || !isFirebaseConfigured || previewUser) return
     setProfileLoading(true)
     const profileRef = doc(db, 'users', profileViewId)
@@ -1179,6 +1334,15 @@ function App() {
       return haystack.includes(queryText)
     })
   }, [homePosts, deferredSearchQuery])
+
+  const filteredRooms = useMemo(() => {
+    const queryText = roomSearch.trim().toLowerCase()
+    if (!queryText) return rooms
+    return rooms.filter((room) => {
+      const haystack = `${room.name || ''} ${room.description || ''}`.toLowerCase()
+      return haystack.includes(queryText)
+    })
+  }, [rooms, roomSearch])
 
   const visibleFeedPosts = useMemo(() => moodFilteredHomePosts.slice(0, feedVisibleCount), [moodFilteredHomePosts, feedVisibleCount])
 
@@ -1939,6 +2103,123 @@ function App() {
     setMessage('Profile updated.')
   }
 
+  async function createRoom(event) {
+    event.preventDefault()
+    if (!currentUserId || !currentUser?.email || !isFirebaseConfigured || previewUser) return
+    if (isCreatingRoom) return
+    const name = roomDraft.name.trim()
+    if (!name) {
+      setRoomMessage('Room name is required.')
+      return
+    }
+    setIsCreatingRoom(true)
+    setRoomMessage('')
+    try {
+      const payload = {
+        name: name.slice(0, 60),
+        description: roomDraft.description.trim().slice(0, 240),
+        owner_id: currentUserId,
+        owner_email: String(currentUser.email || '').trim().toLowerCase(),
+        join_mode: 'request',
+        post_ttl_minutes: Number(roomDraft.postTtl) || 60,
+        created_at: serverTimestamp(),
+      }
+      const docRef = await addDoc(collection(db, 'rooms'), payload)
+      setRoomDraft({ name: '', description: '', postTtl: 60 })
+      setShowCreateRoom(false)
+      setSelectedRoom({ id: docRef.id, ...payload, created_at: Date.now() })
+      showActionToast('Room created.')
+    } catch (error) {
+      console.error('Create room error', error)
+      setRoomMessage(getFriendlyErrorMessage(error, 'general'))
+    } finally {
+      setIsCreatingRoom(false)
+    }
+  }
+
+  async function requestRoomJoin(roomId) {
+    if (!currentUserId || !roomId || !isFirebaseConfigured || previewUser) return
+    if (roomRequestStatus === 'pending') return
+    try {
+      const requestId = `${roomId}_${currentUserId}`
+      await setDoc(
+        doc(db, 'room_requests', requestId),
+        {
+          room_id: roomId,
+          user_id: currentUserId,
+          status: 'pending',
+          created_at: serverTimestamp(),
+          updated_at: serverTimestamp(),
+        },
+        { merge: true },
+      )
+      setRoomRequestStatus('pending')
+      showActionToast('Request sent.')
+    } catch (error) {
+      console.error('Request join error', error)
+      setRoomMessage(getFriendlyErrorMessage(error, 'general'))
+    }
+  }
+
+  async function handleRoomRequest(requestId, status) {
+    if (!selectedRoom?.id || !requestId || !isFirebaseConfigured || previewUser) return
+    try {
+      const reqRef = doc(db, 'room_requests', requestId)
+      await updateDoc(reqRef, {
+        status,
+        updated_at: serverTimestamp(),
+      })
+      const [roomId, userId] = requestId.split('_')
+      if (status === 'approved' && roomId && userId) {
+        await setDoc(
+          doc(db, 'room_members', `${roomId}_${userId}`),
+          {
+            room_id: roomId,
+            user_id: userId,
+            joined_at: serverTimestamp(),
+          },
+          { merge: true },
+        )
+      }
+    } catch (error) {
+      console.error('Handle request error', error)
+      setRoomMessage(getFriendlyErrorMessage(error, 'general'))
+    }
+  }
+
+  async function postToRoom(event) {
+    event.preventDefault()
+    if (!selectedRoom?.id || !currentUserId || !isFirebaseConfigured || previewUser) return
+    if (isPostingRoom) return
+    if (roomRequestStatus !== 'approved') {
+      setRoomMessage('You need approval to post in this room.')
+      return
+    }
+    const text = roomPostDraft.trim()
+    if (!text) return
+    setIsPostingRoom(true)
+    setRoomMessage('')
+    const alias = generateRoomAlias(selectedRoom.id, currentUserId)
+    const expiresMs = Date.now() + (Number(selectedRoom.post_ttl_minutes || 60) * 60 * 1000)
+    try {
+      await addDoc(collection(db, 'room_posts'), {
+        room_id: selectedRoom.id,
+        user_id: currentUserId,
+        text: text.slice(0, 500),
+        alias,
+        created_at: serverTimestamp(),
+        expires_at: new Date(expiresMs),
+      })
+      setRoomPostDraft('')
+      showActionToast('Post sent.')
+    } catch (error) {
+      console.error('Room post error', error)
+      setRoomMessage(getFriendlyErrorMessage(error, 'general'))
+    } finally {
+      setIsPostingRoom(false)
+    }
+  }
+
   async function uploadProfileAvatar(event) {
     if (avatarUploading) return
     const file = event.target.files?.[0]
@@ -2095,6 +2376,7 @@ function App() {
   const navItems = [
     { label: 'Home', id: 'feed' },
     { label: 'Reflect', id: 'reflect' },
+    { label: 'Rooms', id: 'rooms' },
     { label: 'Explore', id: 'search' },
     { label: 'Profile', id: 'profile' },
     ...(canUseAdminUI ? [{ label: 'Admin', id: 'admin' }] : []),
@@ -2103,6 +2385,7 @@ function App() {
   const mobileNavItems = [
     { id: 'feed', label: 'Home' },
     { id: 'reflect', label: 'Reflect' },
+    { id: 'rooms', label: 'Rooms' },
     { id: 'post', label: 'Post' },
     { id: 'search', label: 'Search' },
     { id: 'profile', label: 'Profile' },
@@ -2114,6 +2397,8 @@ function App() {
   const pageTitle =
     activeTab === 'reflect'
       ? 'Reflect'
+      : activeTab === 'rooms'
+      ? 'Anonymous Rooms'
       : activeTab === 'search'
       ? 'Explore'
       : activeTab === 'admin' && canUseAdminUI
@@ -2145,6 +2430,7 @@ function App() {
               >
                 {item.id === 'feed' && '⌂'}
                 {item.id === 'reflect' && '◉'}
+                {item.id === 'rooms' && '◈'}
                 {item.id === 'search' && '⌕'}
                 {item.id === 'profile' && '◌'}
                 {item.id === 'admin' && '⚙'}
@@ -2521,6 +2807,158 @@ function App() {
                   })()}
                 </article>
               ))}
+            </section>
+          )}
+
+          {activeTab === 'rooms' && (
+            <section className="space-y-4">
+              <div className="flex flex-wrap items-center gap-3 rounded-2xl border border-zinc-800 bg-zinc-900/70 p-4">
+                <div className="min-w-0 flex-1">
+                  <p className="text-xs uppercase tracking-[0.3em] text-zinc-500">Anonymous Rooms</p>
+                  <p className="mt-2 text-sm text-zinc-300">Request access, post anonymously, and let your room expire the posts.</p>
+                </div>
+                {canCreateRooms && (
+                  <button
+                    type="button"
+                    onClick={() => setShowCreateRoom(true)}
+                    className="rounded-full border border-emerald-500/40 bg-emerald-500/10 px-4 py-2 text-xs font-semibold text-emerald-100"
+                  >
+                    Create room
+                  </button>
+                )}
+              </div>
+
+              {roomMessage && <p className="rounded-xl border border-zinc-800 bg-zinc-900 px-3 py-2 text-xs text-zinc-300">{roomMessage}</p>}
+
+              <div className="grid gap-4 lg:grid-cols-[280px_minmax(0,1fr)]">
+                <aside className="space-y-2 rounded-2xl border border-zinc-800 bg-zinc-900/60 p-3">
+                  <p className="text-xs uppercase tracking-[0.3em] text-zinc-500">Rooms</p>
+                  <div className="rounded-xl border border-zinc-800 bg-zinc-950 px-3 py-2 text-sm">
+                    <input
+                      value={roomSearch}
+                      onChange={(event) => setRoomSearch(event.target.value)}
+                      placeholder="Search rooms..."
+                      className="w-full bg-transparent text-sm text-zinc-200 outline-none"
+                    />
+                  </div>
+                  {filteredRooms.length === 0 && <p className="text-xs text-zinc-500">No rooms found.</p>}
+                  {filteredRooms.map((room) => (
+                    <button
+                      key={room.id}
+                      type="button"
+                      onClick={() => setSelectedRoom(room)}
+                      className={`w-full rounded-xl border px-3 py-2 text-left text-sm ${
+                        selectedRoom?.id === room.id ? 'border-emerald-500/60 bg-emerald-500/10 text-emerald-100' : 'border-zinc-800 text-zinc-300'
+                      }`}
+                    >
+                      <p className="font-semibold text-zinc-100">{room.name}</p>
+                      <p className="text-xs text-zinc-500">{room.description || 'Anonymous space'}</p>
+                      <p className="mt-1 text-[11px] text-zinc-500">TTL: {room.post_ttl_minutes || 60}m</p>
+                    </button>
+                  ))}
+                </aside>
+
+                <div className="min-h-[40vh] rounded-2xl border border-zinc-800 bg-zinc-900/60 p-4">
+                  {!selectedRoom && <p className="text-sm text-zinc-400">Pick a room to see posts.</p>}
+                  {selectedRoom && (
+                    <div className="space-y-4">
+                      <div className="flex flex-wrap items-center justify-between gap-3">
+                        <div>
+                          <p className="text-xs uppercase tracking-[0.3em] text-zinc-500">Room</p>
+                          <h3 className="text-lg font-semibold text-zinc-100">{selectedRoom.name}</h3>
+                          <p className="text-xs text-zinc-400">{selectedRoom.description || 'Anonymous room'}</p>
+                        </div>
+                        <div className="text-xs text-zinc-500">
+                          {roomMembers.length} members · TTL {selectedRoom.post_ttl_minutes || 60}m
+                        </div>
+                      </div>
+
+                      {roomRequestStatus !== 'approved' && (
+                        <div className="rounded-xl border border-zinc-800 bg-zinc-950 p-3 text-xs text-zinc-300">
+                          {roomRequestStatus === 'pending' && <p>Your request is pending approval.</p>}
+                          {roomRequestStatus === 'rejected' && <p>Your request was rejected.</p>}
+                          {!roomRequestStatus && (
+                            <button
+                              type="button"
+                              onClick={() => requestRoomJoin(selectedRoom.id)}
+                              className="rounded-full border border-emerald-500/40 bg-emerald-500/10 px-3 py-1 text-xs text-emerald-100"
+                            >
+                              Request to join
+                            </button>
+                          )}
+                        </div>
+                      )}
+
+                      <div className="space-y-2">
+                        {roomLoading && <p className="text-xs text-zinc-500">Loading posts...</p>}
+                        {!roomLoading && roomPosts.length === 0 && <p className="text-xs text-zinc-500">No posts yet.</p>}
+                        {roomPosts.map((post) => (
+                          <article key={post.id} className="post-enter rounded-xl border border-zinc-800 bg-zinc-950 p-3 text-sm text-zinc-200">
+                            <div className="flex items-center justify-between text-xs text-zinc-500">
+                              <span>{post.alias}</span>
+                              <span>{formatRelativeTime(post.created_at)}</span>
+                            </div>
+                            <p className="mt-2 text-sm text-zinc-100">{post.text}</p>
+                          </article>
+                        ))}
+                      </div>
+
+                      {roomRequestStatus === 'approved' && (
+                        <form onSubmit={postToRoom} className="flex flex-wrap items-end gap-2 rounded-xl border border-zinc-800 bg-zinc-950 p-3">
+                          <div className="flex-1">
+                            <p className="text-[11px] text-zinc-500">Posting as {generateRoomAlias(selectedRoom.id, currentUserId)}</p>
+                            <textarea
+                              value={roomPostDraft}
+                              onChange={(event) => setRoomPostDraft(event.target.value)}
+                              placeholder="Drop your anonymous thought..."
+                              rows={3}
+                              className="mt-1 w-full rounded-lg border border-zinc-700 bg-zinc-900 px-3 py-2 text-sm"
+                            />
+                          </div>
+                          <button
+                            type="submit"
+                            disabled={isPostingRoom}
+                            className={`rounded-full bg-emerald-500 px-4 py-2 text-xs font-semibold text-zinc-950 ${isPostingRoom ? 'opacity-60' : ''}`}
+                          >
+                            {isPostingRoom ? 'Sending...' : 'Post'}
+                          </button>
+                        </form>
+                      )}
+
+                      {selectedRoom.owner_id === currentUserId && roomRequests.length > 0 && (
+                        <div className="rounded-xl border border-zinc-800 bg-zinc-950 p-3">
+                          <p className="text-xs uppercase tracking-[0.3em] text-zinc-500">Join requests</p>
+                          <div className="mt-2 space-y-2">
+                            {roomRequests
+                              .filter((req) => req.status === 'pending')
+                              .map((req) => (
+                                <div key={req.id} className="flex items-center justify-between rounded-lg border border-zinc-800 bg-zinc-900 px-3 py-2 text-xs">
+                                  <span className="text-zinc-300">{req.user_id}</span>
+                                  <div className="flex gap-2">
+                                    <button
+                                      type="button"
+                                      onClick={() => handleRoomRequest(req.id, 'approved')}
+                                      className="rounded-full border border-emerald-500/40 px-3 py-1 text-emerald-200"
+                                    >
+                                      Approve
+                                    </button>
+                                    <button
+                                      type="button"
+                                      onClick={() => handleRoomRequest(req.id, 'rejected')}
+                                      className="rounded-full border border-rose-500/40 px-3 py-1 text-rose-200"
+                                    >
+                                      Reject
+                                    </button>
+                                  </div>
+                                </div>
+                              ))}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+              </div>
             </section>
           )}
 
@@ -2928,6 +3366,7 @@ function App() {
                 </svg>
               )}
               {item.id === 'reflect' && <span className="text-lg leading-none">◉</span>}
+              {item.id === 'rooms' && <span className="text-lg leading-none">◈</span>}
               {item.id === 'post' && <span className="text-lg leading-none">＋</span>}
               {item.id === 'search' && (
                 <svg viewBox="0 0 24 24" className="h-5 w-5 fill-current">
@@ -3341,6 +3780,57 @@ function App() {
               className="w-full rounded-xl bg-emerald-500 px-3 py-2 text-sm font-medium text-zinc-950 disabled:cursor-not-allowed disabled:bg-zinc-700"
             >
               Publish post
+            </button>
+          </form>
+        </div>
+      )}
+
+      {showCreateRoom && (
+        <div className="fixed inset-0 z-40 grid place-items-center bg-zinc-950/80 p-4 backdrop-blur-sm" onClick={() => setShowCreateRoom(false)}>
+          <form
+            onSubmit={createRoom}
+            onClick={(event) => event.stopPropagation()}
+            className="w-full max-w-md space-y-3 rounded-2xl border border-zinc-700 bg-zinc-900 p-4"
+          >
+            <div className="flex items-center justify-between">
+              <h2 className="font-display text-lg font-semibold">Create Anonymous Room</h2>
+              <button type="button" onClick={() => setShowCreateRoom(false)} className="rounded-full border border-zinc-700 px-3 py-1 text-xs">
+                Close
+              </button>
+            </div>
+            <input
+              value={roomDraft.name}
+              onChange={(event) => setRoomDraft((prev) => ({ ...prev, name: event.target.value }))}
+              placeholder="Room name"
+              className="w-full rounded-xl border border-zinc-700 bg-zinc-950 px-3 py-2 text-sm"
+              maxLength={60}
+              required
+            />
+            <textarea
+              value={roomDraft.description}
+              onChange={(event) => setRoomDraft((prev) => ({ ...prev, description: event.target.value }))}
+              placeholder="Short description (optional)"
+              rows={3}
+              className="w-full rounded-xl border border-zinc-700 bg-zinc-950 px-3 py-2 text-sm"
+              maxLength={240}
+            />
+            <select
+              value={roomDraft.postTtl}
+              onChange={(event) => setRoomDraft((prev) => ({ ...prev, postTtl: Number(event.target.value) }))}
+              className="w-full rounded-xl border border-zinc-700 bg-zinc-950 px-3 py-2 text-sm"
+            >
+              {roomTtlOptions.map((option) => (
+                <option key={option.value} value={option.value}>
+                  Posts delete after {option.label}
+                </option>
+              ))}
+            </select>
+            <button
+              type="submit"
+              disabled={isCreatingRoom}
+              className={`w-full rounded-xl bg-emerald-500 px-3 py-2 text-sm font-semibold text-zinc-950 ${isCreatingRoom ? 'opacity-60' : ''}`}
+            >
+              {isCreatingRoom ? 'Creating...' : 'Create room'}
             </button>
           </form>
         </div>
