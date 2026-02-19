@@ -634,6 +634,7 @@ function App() {
   const centerScrollRef = useRef(null)
   const actionToastTimerRef = useRef(null)
   const roomMemberExistsRef = useRef(false)
+  const notificationsRef = useRef(null)
 
   const currentUser = user ?? previewUser
   const currentUserId = currentUser?.uid || currentUser?.id
@@ -665,6 +666,17 @@ function App() {
       }
     }
   }, [])
+
+  useEffect(() => {
+    if (!showNotifications) return
+    const handleClick = (event) => {
+      if (notificationsRef.current && !notificationsRef.current.contains(event.target)) {
+        setShowNotifications(false)
+      }
+    }
+    window.addEventListener('pointerdown', handleClick)
+    return () => window.removeEventListener('pointerdown', handleClick)
+  }, [showNotifications])
 
   useEffect(() => {
     if (!selectedFile) {
@@ -2579,7 +2591,7 @@ function App() {
                   </button>
                 )}
               </div>
-              <div className="relative">
+              <div className="relative" ref={notificationsRef}>
                 <button
                   type="button"
                   onClick={() => setShowNotifications((prev) => !prev)}
