@@ -1338,14 +1338,13 @@ function App() {
 
   function resolvePostAuthor(post) {
     const latest = postUserProfiles[post.user_id]
-    const postPrivacyKnown = typeof post.author_is_private === 'boolean'
-    const isPrivate = postPrivacyKnown ? post.author_is_private : Boolean(latest?.privateAccount)
+    const isPrivate = Boolean(latest?.privateAccount) || Boolean(post.author_is_private)
     const postLabel = post.author_display_name || post.author_private_alias || ''
     const postHandle = post.author_username || ''
     const postAvatar = post.author_avatar_url || ''
     if (isPrivate) {
       return {
-        label: post.author_private_alias || latest?.privateAlias || generatePrivateAlias(post.user_id),
+        label: latest?.privateAlias || post.author_private_alias || generatePrivateAlias(post.user_id),
         handle: '@hidden',
         avatarUrl: '',
       }
