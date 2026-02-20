@@ -41,6 +41,26 @@ button:active {
     linear-gradient(120deg, rgba(24, 24, 27, 0.95), rgba(9, 9, 11, 0.95));
 }
 
+.landing-shell {
+  background:
+    radial-gradient(circle at 8% 10%, rgba(29, 78, 216, 0.18), transparent 36%),
+    radial-gradient(circle at 88% 12%, rgba(244, 63, 94, 0.14), transparent 34%),
+    #09090b;
+}
+
+.landing-hero {
+  background:
+    linear-gradient(120deg, rgba(24, 24, 27, 0.98), rgba(9, 9, 11, 0.96)),
+    repeating-linear-gradient(
+      0deg,
+      rgba(255, 255, 255, 0.02) 0px,
+      rgba(255, 255, 255, 0.02) 1px,
+      transparent 1px,
+      transparent 24px
+    );
+  box-shadow: 0 24px 70px rgba(0, 0, 0, 0.45);
+}
+
 .hero-video-card {
   position: relative;
   overflow: hidden;

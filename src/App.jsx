@@ -15,6 +15,7 @@ import {
   deleteDoc,
   doc,
   getDoc,
+  getDocs,
   documentId,
   limit,
   onSnapshot,
@@ -39,6 +40,8 @@ const defaultCampus = import.meta.env.VITE_DEFAULT_CAMPUS || 'main'
 const maxImageBytes = 10 * 1024 * 1024
 const feedWindowMs = 24 * 60 * 60 * 1000
 const feedPageSize = 12
+const studentEmailPattern = import.meta.env.VITE_STUDENT_EMAIL_REGEX || '^[^\\s@]+@[^\\s@]+\\.edu$'
+const studentEmailHint = import.meta.env.VITE_STUDENT_EMAIL_HINT || 'name@school.edu'
 
 const reactionTypes = [
   { key: 'annoyed', emoji: '😒' },
@@ -223,6 +226,48 @@ function splitIntoChunks(items, size) {
   return chunks
 }
 
+function normalizeEmail(value) {
+  return String(value || '').trim().toLowerCase()
+}
+
+function buildStudentEmailRegex(pattern) {
+  try {
+    return new RegExp(pattern, 'i')
+  } catch (error) {
+    console.warn('Invalid VITE_STUDENT_EMAIL_REGEX, defaulting to .edu validation.', error)
+    return /^[^\s@]+@[^\s@]+\.edu$/i
+  }
+}
+
+const studentEmailRegex = buildStudentEmailRegex(studentEmailPattern)
+
+function isStudentEmail(value) {
+  const normalized = normalizeEmail(value)
+  return Boolean(normalized) && studentEmailRegex.test(normalized)
+}
+
+async function fetchUserSummariesByIds(userIds) {
+  const uniqueIds = Array.from(new Set((userIds || []).filter(Boolean)))
+  if (uniqueIds.length === 0) return []
+
+  const byId = {}
+  const chunks = splitIntoChunks(uniqueIds, 10)
+  for (const chunk of chunks) {
+    const q = query(collection(db, 'users'), where(documentId(), 'in', chunk))
+    const snap = await getDocs(q)
+    snap.docs.forEach((row) => {
+      const data = row.data() || {}
+      byId[row.id] = {
+        id: row.id,
+        displayName: data.displayName || 'Mirror Student',
+        username: data.username || '@mirroruser',
+      }
+    })
+  }
+
+  return uniqueIds.map((id) => byId[id] || { id, displayName: 'Mirror Student', username: '@mirroruser' })
+}
+
 function validateMediaFile(file) {
   if (!file) return 'Select a file to upload.'
   const isImage = file.type.startsWith('image/')
@@ -369,82 +414,38 @@ function Landing({
   }, [])
 
   return (
-    <main className="min-h-screen bg-zinc-950 px-4 py-10 text-zinc-100 sm:px-6 lg:px-10">
-      <section className="mx-auto grid w-full max-w-6xl gap-8 lg:grid-cols-[1.1fr_0.9fr]">
-        <div className="grid gap-8">
-          <div className="rounded-3xl border border-zinc-800 bg-hero-gradient p-6 sm:p-8">
-            <p className="text-xs uppercase tracking-[0.32em] text-emerald-300">Mirror</p>
-            <h1 className="mt-4 font-display text-4xl font-semibold leading-tight sm:text-6xl">Your Campus. Unfiltered.</h1>
-            <p className="mt-4 max-w-xl text-base text-zinc-300 sm:text-lg">
-              The real thoughts. The real drip. The real chaos.
-              <br />
-              All in one place.
-            </p>
-            <div className="mt-6 flex flex-wrap items-center gap-3 text-sm text-zinc-300">
-              <span className="rounded-full border border-emerald-500/40 bg-emerald-500/10 px-4 py-2">Enter Mirror</span>
-              <span className="rounded-full border border-zinc-700 bg-zinc-900/60 px-4 py-2">See What’s Trending 🔥</span>
+    <main className="landing-shell min-h-screen px-4 py-10 text-zinc-100 sm:px-6 lg:px-10">
+      <section className="mx-auto grid w-full max-w-6xl gap-8 lg:grid-cols-[1.06fr_0.94fr]">
+        <div className="grid gap-5">
+          <div className="landing-hero rounded-3xl border border-zinc-800/80 p-6 sm:p-8">
+            <p className="text-xs uppercase tracking-[0.32em] text-zinc-400">Mirror</p>
+            <h1 className="mt-3 font-display text-4xl font-semibold leading-tight sm:text-6xl">Campus, live now.</h1>
+            <p className="mt-4 max-w-lg text-sm text-zinc-300 sm:text-base">Post fast. React fast. Keep it real.</p>
+            <div className="mt-5 flex flex-wrap items-center gap-2 text-xs text-zinc-300">
+              <span className="rounded-full border border-zinc-700 bg-zinc-900/80 px-3 py-1.5">Campus feed</span>
+              <span className="rounded-full border border-zinc-700 bg-zinc-900/80 px-3 py-1.5">Anonymous rooms</span>
+              <span className="rounded-full border border-zinc-700 bg-zinc-900/80 px-3 py-1.5">Real profiles</span>
             </div>
-            <div className="mt-6 text-xs text-zinc-400">
+            <div className="mt-6 text-xs text-zinc-500">
               <span key={hypeLines[hypeIndex]} className="typewriter">
                 {hypeLines[hypeIndex]}
               </span>
             </div>
           </div>
 
-          <div className="rounded-3xl border border-zinc-800 bg-zinc-900/60 p-6 sm:p-8">
-            <p className="text-xs uppercase tracking-[0.3em] text-emerald-200/80">Identity hook</p>
-            <h2 className="mt-3 font-display text-2xl font-semibold">Students don’t join platforms. They join identity.</h2>
-            <div className="mt-4 grid gap-2 text-sm text-zinc-300">
-              <p>Are you:</p>
-              <p>The quiet observer?</p>
-              <p>The fashion plug?</p>
-              <p>The anonymous ranter?</p>
-              <p>The streak grinder?</p>
-              <p>The campus legend in progress?</p>
+          <div className="grid gap-3 sm:grid-cols-3">
+            <div className="rounded-2xl border border-zinc-800 bg-zinc-900/70 p-4">
+              <p className="text-[11px] uppercase tracking-[0.24em] text-zinc-500">Now</p>
+              <p className="mt-2 text-sm text-zinc-200">Fresh drops</p>
             </div>
-            <p className="mt-4 text-sm text-emerald-200">Mirror shows who you really are.</p>
-          </div>
-
-          <div className="grid gap-4 sm:grid-cols-2">
-            <div className="rounded-3xl border border-zinc-800 bg-zinc-900/60 p-6">
-              <p className="text-xs uppercase tracking-[0.3em] text-zinc-500">Today</p>
-              <div className="mt-3 space-y-2 text-sm text-zinc-200">
-                <p>🔥 248 posts today</p>
-                <p>👀 1,204 reactions this week</p>
-                <p>🎭 73 anonymous confessions</p>
-                <p>🏆 19 students on fire streak</p>
-              </div>
+            <div className="rounded-2xl border border-zinc-800 bg-zinc-900/70 p-4">
+              <p className="text-[11px] uppercase tracking-[0.24em] text-zinc-500">Vibe</p>
+              <p className="mt-2 text-sm text-zinc-200">Fast scroll flow</p>
             </div>
-            <div className="rounded-3xl border border-zinc-800 bg-zinc-900/60 p-6">
-              <p className="text-xs uppercase tracking-[0.3em] text-zinc-500">Why Mirror</p>
-              <p className="mt-3 text-sm text-zinc-200">
-                You scroll Instagram. You watch TikTok.
-                <br />
-                But what’s happening on your campus?
-              </p>
-              <p className="mt-3 text-sm text-emerald-200">
-                Mirror is built for your school. Not for influencers in LA. For you.
-              </p>
+            <div className="rounded-2xl border border-zinc-800 bg-zinc-900/70 p-4">
+              <p className="text-[11px] uppercase tracking-[0.24em] text-zinc-500">Campus</p>
+              <p className="mt-2 text-sm text-zinc-200">Students only</p>
             </div>
-          </div>
-
-          <div className="rounded-3xl border border-zinc-800 bg-zinc-900/60 p-6 sm:p-8">
-            <p className="text-xs uppercase tracking-[0.3em] text-zinc-500">What’s inside</p>
-            <div className="mt-4 grid gap-2 text-sm text-zinc-200">
-              <p>👤 Profiles that evolve</p>
-              <p>🔥 Streaks that build status</p>
-              <p>🎭 Anonymous rooms</p>
-              <p>💬 Real comments, not fake hype</p>
-              <p>👗 Outfit drops</p>
-              <p>🏆 Leaderboards</p>
-            </div>
-          </div>
-
-          <div className="rounded-3xl border border-emerald-500/30 bg-emerald-500/10 p-6 sm:p-8">
-            <h2 className="font-display text-2xl font-semibold">Stop watching. Start being seen.</h2>
-            <button type="button" className="mt-4 w-full rounded-full bg-emerald-500 px-4 py-2 text-sm font-semibold text-zinc-950">
-              Join Mirror
-            </button>
           </div>
         </div>
 
@@ -472,9 +473,12 @@ function Landing({
                 required
                 value={email}
                 onChange={(event) => setEmail(event.target.value)}
-                placeholder="Email address"
+                autoCapitalize="none"
+                autoCorrect="off"
+                placeholder={studentEmailHint}
                 className="w-full rounded-xl border border-zinc-700 bg-zinc-950 px-3 py-2 text-sm"
               />
+              <p className="text-[11px] text-zinc-500">Use your student email to continue.</p>
               <input
                 type="password"
                 required
@@ -532,7 +536,6 @@ function App() {
 
   const [posts, setPosts] = useState([])
   const [feedVisibleCount, setFeedVisibleCount] = useState(feedPageSize)
-  const [feedFetchLimit, setFeedFetchLimit] = useState(180)
   const [draftPost, setDraftPost] = useState(emptyPost)
   const [showComposer, setShowComposer] = useState(false)
   const [postMode, setPostMode] = useState('text')
@@ -568,7 +571,6 @@ function App() {
 
   const [selectedFile, setSelectedFile] = useState(null)
   const [previewUrl, setPreviewUrl] = useState('')
-  const [_suggestedUsers, setSuggestedUsers] = useState([])
   const [reflectionCommentDrafts, setReflectionCommentDrafts] = useState({})
   const [reflectionCommentsPostId, setReflectionCommentsPostId] = useState(null)
   const [showAvatarModal, setShowAvatarModal] = useState(false)
@@ -610,7 +612,9 @@ function App() {
   const [profile, setProfile] = useState(baseProfile)
   const [followersCount, setFollowersCount] = useState(0)
   const [followingCount, setFollowingCount] = useState(0)
+  const [followerIds, setFollowerIds] = useState([])
   const [followingIds, setFollowingIds] = useState([])
+  const [followingMemberIds, setFollowingMemberIds] = useState([])
   const [followersList, setFollowersList] = useState([])
   const [followingList, setFollowingList] = useState([])
   const [networkView, setNetworkView] = useState(null)
@@ -645,6 +649,7 @@ function App() {
   const isAdminOwnerEmail = (currentUser?.email || '').toLowerCase() === adminOwnerEmail
   const canUseAdminUI = isAdmin && isAdminOwnerEmail
   const deferredSearchQuery = useDeferredValue(searchQuery)
+  const feedFetchLimit = Math.min(480, Math.max(72, feedVisibleCount * 4))
 
   useEffect(() => {
     if (activeTab === 'admin' && !canUseAdminUI) {
@@ -659,6 +664,18 @@ function App() {
     })
     return () => unsubscribe()
   }, [])
+
+  useEffect(() => {
+    if (!isFirebaseConfigured || !user?.email) return
+    const emailValue = normalizeEmail(user.email)
+    if (isStudentEmail(emailValue)) return
+    firebaseSignOut(auth)
+      .then(() => setMessage(`Use your student email (${studentEmailHint}).`))
+      .catch((error) => {
+        console.error('Student email sign-out enforcement error', error)
+        setMessage(`Use your student email (${studentEmailHint}).`)
+      })
+  }, [user?.email])
 
   useEffect(() => {
     return () => {
@@ -815,7 +832,8 @@ function App() {
   }, [isAuthed, previewUser])
 
   useEffect(() => {
-    if (!isAuthed || !isFirebaseConfigured || previewUser) return
+    const shouldTrackPosts = activeTab !== 'rooms' && !(activeTab === 'admin' && canUseAdminUI)
+    if (!isAuthed || !isFirebaseConfigured || previewUser || !shouldTrackPosts) return
     const postsRef = collection(db, 'picture_posts')
     const cutoffDate = new Date(Date.now() - feedWindowMs)
     const bucketState = {
@@ -1001,74 +1019,82 @@ function App() {
       clearInterval(rankTimer)
       unsubs.forEach((unsubscribe) => unsubscribe())
     }
-  }, [isAuthed, campusId, previewUser, currentUserId, followingIds, profile.styleTags, feedFetchLimit])
+  }, [isAuthed, campusId, previewUser, currentUserId, followingIds, profile.styleTags, feedFetchLimit, activeTab, canUseAdminUI])
 
   useEffect(() => {
-    if (!isAuthed || !isFirebaseConfigured || previewUser) return
+    const shouldTrackSocialGraph = activeTab !== 'rooms' && !(activeTab === 'admin' && canUseAdminUI)
+    if (!isAuthed || !isFirebaseConfigured || previewUser || !shouldTrackSocialGraph) return
     const followersQuery = query(collection(db, 'follows'), where('followingId', '==', currentUserId))
     const followingQuery = query(collection(db, 'follows'), where('followerId', '==', currentUserId))
 
-    const unsubscribeFollowers = onSnapshot(followersQuery, async (snap) => {
+    const unsubscribeFollowers = onSnapshot(followersQuery, (snap) => {
       setFollowersCount(snap.size)
       const ids = snap.docs.map((row) => row.data().followerId).filter(Boolean)
-      const users = await Promise.all(
-        ids.map(async (id) => {
-          const userSnap = await getDoc(doc(db, 'users', id))
-          const data = userSnap.exists() ? userSnap.data() : {}
-          return {
-            id,
-            displayName: data.displayName || 'Mirror Student',
-            username: data.username || '@mirroruser',
-          }
-        }),
-      )
-      setFollowersList(users)
+      setFollowerIds(ids)
     })
-    const unsubscribeFollowing = onSnapshot(followingQuery, async (snap) => {
+    const unsubscribeFollowing = onSnapshot(followingQuery, (snap) => {
       setFollowingCount(snap.size)
       const ids = snap.docs.map((row) => row.data().followingId).filter(Boolean)
       setFollowingIds(ids)
-      const users = await Promise.all(
-        ids.map(async (id) => {
-          const userSnap = await getDoc(doc(db, 'users', id))
-          const data = userSnap.exists() ? userSnap.data() : {}
-          return {
-            id,
-            displayName: data.displayName || 'Mirror Student',
-            username: data.username || '@mirroruser',
-          }
-        }),
-      )
-      setFollowingList(users)
+      setFollowingMemberIds(ids)
     })
 
     return () => {
       unsubscribeFollowers()
       unsubscribeFollowing()
     }
-  }, [isAuthed, currentUserId, previewUser, currentUser])
+  }, [isAuthed, currentUserId, previewUser, activeTab, canUseAdminUI])
 
   useEffect(() => {
-    if (!isAuthed || !isFirebaseConfigured || previewUser) return
-    const usersQuery = query(collection(db, 'users'), limit(25))
-    const unsubscribe = onSnapshot(usersQuery, (snapshot) => {
-      const followingSet = new Set(followingIds)
-      const rows = snapshot.docs
-        .map((docSnap) => ({ id: docSnap.id, ...docSnap.data() }))
-        .filter((row) => row.id !== currentUserId && !followingSet.has(row.id))
-        .slice(0, 6)
-        .map((row) => ({
-          id: row.id,
-          name: row.displayName || 'Student',
-          handle: row.username || '@mirroruser',
-        }))
-      setSuggestedUsers(rows)
-    })
-    return () => unsubscribe()
-  }, [isAuthed, currentUserId, followingIds, previewUser])
+    if (!isAuthed || !isFirebaseConfigured || previewUser) {
+      setFollowersList([])
+      return
+    }
+    let cancelled = false
+    const loadUsers = async () => {
+      if (followerIds.length === 0) {
+        setFollowersList([])
+        return
+      }
+      try {
+        const users = await fetchUserSummariesByIds(followerIds)
+        if (!cancelled) setFollowersList(users)
+      } catch (error) {
+        console.error('Followers profile lookup error', error)
+      }
+    }
+    loadUsers()
+    return () => {
+      cancelled = true
+    }
+  }, [isAuthed, previewUser, followerIds])
 
   useEffect(() => {
-    if (!isAuthed || !isFirebaseConfigured || previewUser || !currentUser?.email) {
+    if (!isAuthed || !isFirebaseConfigured || previewUser) {
+      setFollowingList([])
+      return
+    }
+    let cancelled = false
+    const loadUsers = async () => {
+      if (followingMemberIds.length === 0) {
+        setFollowingList([])
+        return
+      }
+      try {
+        const users = await fetchUserSummariesByIds(followingMemberIds)
+        if (!cancelled) setFollowingList(users)
+      } catch (error) {
+        console.error('Following profile lookup error', error)
+      }
+    }
+    loadUsers()
+    return () => {
+      cancelled = true
+    }
+  }, [isAuthed, previewUser, followingMemberIds])
+
+  useEffect(() => {
+    if (!isAuthed || !isFirebaseConfigured || previewUser || activeTab !== 'rooms' || !currentUser?.email) {
       setCanCreateRooms(false)
       return
     }
@@ -1088,10 +1114,10 @@ function App() {
       () => setCanCreateRooms(false),
     )
     return () => unsubscribe()
-  }, [isAuthed, previewUser, currentUser?.email, isAdmin])
+  }, [isAuthed, previewUser, currentUser?.email, isAdmin, activeTab])
 
   useEffect(() => {
-    if (!isAuthed || !isFirebaseConfigured || previewUser) {
+    if (!isAuthed || !isFirebaseConfigured || previewUser || activeTab !== 'rooms') {
       setRooms([])
       return
     }
@@ -1108,10 +1134,10 @@ function App() {
       },
     )
     return () => unsubscribe()
-  }, [isAuthed, previewUser])
+  }, [isAuthed, previewUser, activeTab])
 
   useEffect(() => {
-    if (!selectedRoom?.id || !isAuthed || !isFirebaseConfigured || previewUser) {
+    if (!selectedRoom?.id || !isAuthed || !isFirebaseConfigured || previewUser || activeTab !== 'rooms') {
       setRoomPosts([])
       setRoomRequestStatus(null)
       setRoomRequests([])
@@ -1446,9 +1472,6 @@ function App() {
   function loadMoreFeed() {
     setFeedVisibleCount((prev) => {
       const next = Math.min(moodFilteredHomePosts.length, prev + feedPageSize)
-      if (next >= moodFilteredHomePosts.length - 2) {
-        setFeedFetchLimit((limitValue) => Math.min(1200, limitValue + 120))
-      }
       return next
     })
   }
@@ -1491,15 +1514,21 @@ function App() {
       setMessage('Firebase is not configured yet.')
       return
     }
+    const normalizedEmail = normalizeEmail(email)
+    if (!isStudentEmail(normalizedEmail)) {
+      setMessage(`Use your student email (${studentEmailHint}).`)
+      return
+    }
     setLoading(true)
     try {
       if (mode === 'signup') {
-        await createUserWithEmailAndPassword(auth, email, password)
+        await createUserWithEmailAndPassword(auth, normalizedEmail, password)
         setMessage('Account created. Welcome!')
       } else {
-        await signInWithEmailAndPassword(auth, email, password)
+        await signInWithEmailAndPassword(auth, normalizedEmail, password)
         setMessage('Welcome back.')
       }
+      setEmail(normalizedEmail)
       setPassword('')
     } catch (error) {
       console.error('Auth error', error)
@@ -1517,7 +1546,13 @@ function App() {
     }
     setLoading(true)
     try {
-      await signInWithPopup(auth, googleProvider)
+      const result = await signInWithPopup(auth, googleProvider)
+      const signedInEmail = normalizeEmail(result?.user?.email)
+      if (!isStudentEmail(signedInEmail)) {
+        await firebaseSignOut(auth)
+        setMessage(`Use your student email (${studentEmailHint}).`)
+        return
+      }
       setMessage('Welcome back.')
     } catch (error) {
       console.error('Google auth error', error)

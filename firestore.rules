@@ -120,10 +120,18 @@ service cloud.firestore {
         && request.resource.data.reactions_count.thumbs_up >= 0
         && request.resource.data.reactions_count.laugh >= 0
         && request.resource.data.reacted_by is map
-        && request.resource.data.comments_count >= 0
-        && request.resource.data.comments is list
         && (
-          request.resource.data.comments_count == resource.data.comments_count
+          !request.resource.data.keys().hasAny(['comments_count'])
+          || request.resource.data.comments_count >= 0
+        )
+        && (
+          !request.resource.data.keys().hasAny(['comments'])
+          || request.resource.data.comments is list
+        )
+        && (
+          !request.resource.data.keys().hasAny(['comments_count'])
+          || !resource.data.keys().hasAny(['comments_count'])
+          || request.resource.data.comments_count == resource.data.comments_count
           || request.resource.data.media_type != 'text'
         )
       );
